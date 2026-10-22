@@ -184,6 +184,7 @@
 
         <label for="camera">Camera near the pills</label>
         <select id="camera"></select>
+        <p class="hint" id="camHint"></p>
 
         <div class="grid2">
           <div><label for="before">Minutes before the dose time</label><input id="before" type="number" min="0" max="180"></div>
@@ -302,7 +303,7 @@ function renderToday(d) {
     const near = e.deviceId === d.cameraId;
     const kind = e.type === 'motion_detected' ? 'Motion' : e.type;
     const li = row(timeOf(e.time, d.timezone), `${kind} - ${d.demoCamera && near ? 'demo camera (simulation)' : near ? 'camera near the pills' : 'other camera'}`, e.simulated ? 'dot sim' : 'dot motion');
-    if (e.simulated) li.append(el('span', 'pill sim', wording.ui.simulate.badge));
+    li.append(e.simulated ? el('span', 'pill sim', wording.ui.simulate.badge) : el('span', 'pill likely_taken', wording.ui.ringEventBadge));
     rows.push({ at: e.time, li });
   }
   for (const a of d.alerts) rows.push({ at: a.sentAt, li: row(timeOf(a.sentAt, d.timezone), `Alert email sent for the ${a.doseTime} dose`, 'dot alert') });
@@ -427,10 +428,16 @@ async function loadSettings() {
   const sel = $('camera');
   sel.replaceChildren(new Option('No camera chosen', ''));
   const ids = new Set();
+  $('camHint').textContent = '';
   try {
-    (await api('/api/devices')).devices.forEach((dev) => { sel.append(new Option(dev.name, dev.id)); ids.add(dev.id); });
+    const r = await api('/api/devices');
+    r.devices.forEach((dev) => { sel.append(new Option(dev.name, dev.id)); ids.add(dev.id); });
+    const hints = [];
+    if (r.ringApi !== 'ok') hints.push(wording.ui.cameraHintNotLinked);
+    if (!r.devices.length) hints.push(wording.ui.cameraHintNoneSeen);
+    $('camHint').textContent = hints.join(' ');
   } catch (err) {
-    $('msg').textContent = `Could not list Ring cameras: ${err.message}`;
+    $('camHint').textContent = wording.ui.cameraHintNotLinked;
   }
   sel.append(new Option(wording.ui.demoCamera, wording.demoCameraId)); // always offered so the demo works without Ring
   ids.add(wording.demoCameraId);

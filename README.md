@@ -4,6 +4,10 @@ A small caregiver app for Amazon Ring. A family caregiver picks the Ring camera 
 
 Built for the Amazon "Build, Ship, Shape" Developer Hackathon, Ring track (caretaking use case), with AWS Bedrock and SES.
 
+## Using the Ring Playground (no Ring device needed)
+
+The Ring Playground can send test motion events with the real Ring v1.1 payload to `POST /webhooks/ring`. When `RING_HMAC_KEY` is set, only events signed by Ring (`X-Signature: sha256=<hex HMAC-SHA256 of the raw body>`) are accepted; anything else gets HTTP 401. Accepted events are stored as real events and shown in the dashboard timeline with a "Ring Playground event" label, unlike events from the demo button, which are labelled "Simulation". In Settings, the camera list shows devices seen in these events, so a Playground device can be chosen as the "camera near the pills" without linking a Ring account.
+
 ## What it can and cannot tell you
 
 Motion near the pills does not prove a pill was taken, and no motion does not prove one was missed. Ring Med Watch only sees motion at one camera, so it never says "taken" or "missed" as a fact. The wording everywhere is "activity seen near the pills (not a confirmation)", "no activity seen near the pills - not confirmed" and "possibly missed".
@@ -125,7 +129,7 @@ The first version (15 Sep 2026) had a single rule: no motion at the front door f
 
 ## Known limits
 
-- The Ring account is connected by a manually supplied refresh token. Full OAuth account linking in the browser is not built.
+- Full Ring OAuth account linking is not built. Without a refresh token, the camera list uses devices seen in Ring (Playground) events instead of the Ring Devices API.
 - Testing so far uses the Ring Playground sandbox and fake events, not a real camera at someone's home.
 - The camera list (`GET /v1/devices`) and the token refresh are written from Ring's documentation and covered by unit tests with fakes. They have not yet been run against the live Ring API.
 - The original 12-hour no-motion alert keeps its timer in memory and runs on a timer inside the server. On Cloud Run, which can scale to zero, it is not reliable. The dose-window checks do not have this problem because they run from Cloud Scheduler and store data in DynamoDB.

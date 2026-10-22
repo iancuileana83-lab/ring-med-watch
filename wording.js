@@ -47,12 +47,20 @@ const UI = {
     badge: 'Simulation',
     clear: 'Remove simulated events'
   },
+  // PROPOSED wording for real Ring (Playground) events and camera list, pending approval.
+  ringEventBadge: 'Ring Playground event',
+  cameraHintNotLinked: 'The Ring camera list is not linked. Devices seen in Ring Playground events are listed instead.',
+  cameraHintNoneSeen: 'No Ring Playground device seen yet. Send a test motion event from the Playground, then reload this page.',
   checkedIn: 'Checked in',
   checkedInAt: 'Checked in at',
   notCheckedIn: 'Not checked in yet',
   labelHint: 'Optional name for this dose, like Morning pills. Please do not enter medicine names.',
   demoCamera: 'Demo camera (simulation)'
 };
+
+function seenDeviceName(id) {
+  return `Ring Playground device (${String(id).slice(-6)})`;
+}
 
 function dosesSummary(scheduled, seen, notConfirmed) {
   return `${scheduled} scheduled · ${seen} activity seen · ${notConfirmed} not confirmed`;
@@ -133,5 +141,5 @@ function missedFallback(doseTime, windowStart, windowEnd) {
 module.exports = {
   STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback,
   CHECKIN, DEMO_ALERT_SUFFIX, DEMO_ALERT_NOTE, SUMMARY_SUBJECT, SIMULATED_NOTE, summaryFactsText, summaryPrompt, summaryFallback,
-  NAV, PRIVACY_LINES, UI, dosesSummary, alertsSummary, lastActivitySummary, houseStatus
+  NAV, PRIVACY_LINES, UI, seenDeviceName, dosesSummary, alertsSummary, lastActivitySummary, houseStatus
 };

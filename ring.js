@@ -16,7 +16,8 @@ async function getAccessToken() {
   }
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    // Ring's docs say requests to oauth.ring.com must carry User-Agent and Hardware_Id (else HTTP 406).
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'ring-med-watch/1.0', Hardware_Id: 'ring-med-watch' },
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       client_id: process.env.RING_CLIENT_ID,
@@ -68,8 +69,26 @@ function parseWebhook(payload) {
     id: payload?.data?.id || payload?.meta?.request_id || `${type}-${time.getTime()}`,
     time: time.toISOString(),
     type,
-    deviceId: attrs.source || null
+    deviceId: deviceIdOf(payload)
   };
 }
 
-module.exports = { listDevices, verifySignature, parseWebhook };
+// The camera that produced the event: attributes.source, else the device in the event's relationships
+// (an id, or a link ending in /v1/devices/<id>).
+function deviceIdOf(payload) {
+  const attrs = payload?.data?.attributes || {};
+  if (attrs.source) return String(attrs.source);
+  const rel = payload?.data?.relationships?.devices;
+  const direct = Array.isArray(rel?.data) ? rel.data[0]?.id : rel?.data?.id;
+  if (direct) return String(direct);
+  const link = rel?.links?.related || rel?.links?.self || (typeof rel === 'string' ? rel : null);
+  const m = typeof link === 'string' && link.match(/\/devices\/([^/?#]+)/);
+  return m ? m[1] : null;
+}
+
+// True when the Ring credentials needed for the Devices API are present.
+function ringApiConfigured() {
+  return Boolean(process.env.RING_CLIENT_ID && process.env.RING_CLIENT_SECRET && process.env.RING_REFRESH_TOKEN);
+}
+
+module.exports = { listDevices, verifySignature, parseWebhook, ringApiConfigured };

@@ -3,7 +3,7 @@ const express = require('express');
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 
-const { listDevices, verifySignature, parseWebhook } = require('./ring');
+const { listDevices, verifySignature, parseWebhook, ringApiConfigured } = require('./ring');
 const { createMemoryStore } = require('./store');
 const { createDynamoStore } = require('./store-dynamodb');
 const { hashToken, TOKEN_RE } = require('./checkin');
@@ -11,7 +11,7 @@ const { runDailySummary } = require('./summary');
 const { DEMO_CAMERA_ID, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses, dayBounds } = require('./doses');
 const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback,
   CHECKIN, SUMMARY_SUBJECT, DEMO_ALERT_SUFFIX, DEMO_ALERT_NOTE,
-  NAV, PRIVACY_LINES, UI, dosesSummary, alertsSummary, lastActivitySummary, houseStatus } = require('./wording');
+  NAV, PRIVACY_LINES, UI, seenDeviceName, dosesSummary, alertsSummary, lastActivitySummary, houseStatus } = require('./wording');
 
 const app = express();
 // Keep the raw bytes: Ring's webhook signature is computed over them.
@@ -98,6 +98,8 @@ async function checkAndAlert() {
 app.post('/webhooks/ring', async (req, res) => {
   // Signature check is enforced only when RING_HMAC_KEY is configured.
   if (process.env.RING_HMAC_KEY && !verifySignature(req.rawBody || '', req.headers['x-signature'], process.env.RING_HMAC_KEY)) {
+    // Say why an event was dropped, without logging its content.
+    console.warn(`Ring webhook rejected: ${req.headers['x-signature'] ? 'signature does not match RING_HMAC_KEY' : 'no X-Signature header'}`);
     return res.status(401).send('Invalid signature');
   }
 
@@ -120,13 +122,25 @@ app.post('/webhooks/ring', async (req, res) => {
   res.status(200).send('OK');
 });
 
-// Lists Ring cameras on the linked account (used to pick the camera near the pills).
+// Cameras to choose from: the linked Ring account (when a refresh token is configured) plus any device
+// seen in real Ring events (for example from the Ring Playground), so the list works without account linking.
 app.get('/api/devices', requirePassword, async (req, res) => {
-  try {
-    res.json({ devices: await listDevices() });
-  } catch (err) {
-    res.status(502).json({ error: err.message });
+  let ringApi = ringApiConfigured() ? 'ok' : 'not_linked';
+  let apiDevices = [];
+  if (ringApi === 'ok') {
+    try {
+      apiDevices = (await listDevices()).map((d) => ({ ...d, source: 'ring-api' }));
+    } catch (err) {
+      console.warn('Ring camera list unavailable:', err.message);
+      ringApi = 'error';
+    }
   }
+  const now = Date.now();
+  const events = await store.listEvents(new Date(now - 30 * 24 * 3600 * 1000).toISOString(), new Date(now + 1000).toISOString());
+  const known = new Set(apiDevices.map((d) => d.id));
+  const seen = [...new Set(events.filter((e) => !e.simulated && e.deviceId && !known.has(e.deviceId)).map((e) => e.deviceId))]
+    .map((id) => ({ id, name: seenDeviceName(id), source: 'ring-events' }));
+  res.json({ devices: [...apiDevices, ...seen], ringApi });
 });
 
 app.get('/api/settings', requirePassword, async (req, res) => {
