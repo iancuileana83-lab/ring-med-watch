@@ -52,6 +52,10 @@ Tested against the Ring Developer Playground sandbox.
 |---|---|---|
 | `ALERT_EMAIL` | Caregiver's email address (also used as verified SES sender) | - |
 | `NO_MOTION_ALERT_HOURS` | Hours of no motion before an alert is generated | 12 |
+| `DASHBOARD_PASSWORD` | Password for the caregiver API (`/api/*`, `/test/*`) | - |
+| `TIMEZONE` | IANA timezone for dose times, e.g. `Europe/Bucharest` | - |
+| `RING_CLIENT_ID`, `RING_CLIENT_SECRET`, `RING_REFRESH_TOKEN` | Ring API credentials (device listing) | - |
+| `RING_HMAC_KEY` | Optional. If set, webhook signatures are verified | - |
 
 ## Running locally
 
@@ -62,11 +66,16 @@ node index.js
 
 ## Testing
 
+`/test/trigger-alert` sends a real email, so it needs the dashboard password (`DASHBOARD_PASSWORD`, HTTP Basic auth, any username):
+
 ```bash
 curl -X POST http://localhost:8080/test/trigger-alert \
+  -u caregiver:YOUR_DASHBOARD_PASSWORD \
   -H "Content-Type: application/json" \
   -d '{"hours":13}'
 ```
+
+Unit tests (no AWS or Ring access needed): `npm test`. To send fake Ring motion events to a local server: `node scripts/simulate-ring.js`.
 
 ## Future improvements
 

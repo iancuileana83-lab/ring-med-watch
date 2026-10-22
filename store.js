@@ -5,7 +5,14 @@
 function createMemoryStore() {
   const events = [];
   const seen = new Set();
-  let settings = { doses: [], windowMinutes: 60, cameraId: null };
+  const alerts = new Map();
+  let settings = {
+    doses: [],
+    windowBeforeMinutes: 15,
+    windowAfterMinutes: 45,
+    cameraId: null,
+    timezone: process.env.TIMEZONE || 'UTC'
+  };
 
   return {
     // Returns false if an event with the same id was already recorded (webhook retries).
@@ -20,6 +27,17 @@ function createMemoryStore() {
       return events
         .filter((e) => e.time >= fromIso && e.time < toIso)
         .sort((a, b) => a.time.localeCompare(b.time));
+    },
+    // One alert per dose window; returns false if this key was already alerted.
+    async recordAlert(key, alert) {
+      if (alerts.has(key)) return false;
+      alerts.set(key, { key, ...alert });
+      return true;
+    },
+    async listAlerts(fromIso, toIso) {
+      return [...alerts.values()]
+        .filter((a) => a.sentAt >= fromIso && a.sentAt < toIso)
+        .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
     },
     async getSettings() {
       return { ...settings };

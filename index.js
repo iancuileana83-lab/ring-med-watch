@@ -5,6 +5,7 @@ const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 
 const { listDevices, verifySignature, parseWebhook } = require('./ring');
 const { createMemoryStore } = require('./store');
+const { validateSettings, evaluateDoses, checkDoses, dayBounds } = require('./doses');
 
 const app = express();
 // Keep the raw bytes: Ring's webhook signature is computed over them.
@@ -116,6 +117,39 @@ app.get('/api/devices', requirePassword, async (req, res) => {
   }
 });
 
+app.get('/api/settings', requirePassword, async (req, res) => {
+  res.json(await store.getSettings());
+});
+
+app.put('/api/settings', requirePassword, async (req, res) => {
+  try {
+    res.json(await store.saveSettings(validateSettings(req.body || {})));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Today's dose windows and their status.
+app.get('/api/doses', requirePassword, async (req, res) => {
+  const settings = await store.getSettings();
+  const { from, to } = dayBounds(Date.now(), settings.timezone);
+  res.json({ doses: evaluateDoses(settings, await store.listEvents(from, to), Date.now()) });
+});
+
+// Called on a schedule (every few minutes). Alert wording is still pending the
+// caregiver's approval, so for now a missed window is only logged, not emailed.
+async function notifyPossiblyMissed(dose) {
+  console.log('Dose window ended without motion:', dose.key, '(alert wording pending approval, no email sent)');
+}
+
+app.post('/internal/check-doses', requirePassword, async (req, res) => {
+  try {
+    res.json(await checkDoses({ store, notify: notifyPossiblyMissed }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Today's recorded events (time, type, device only).
 app.get('/api/events', requirePassword, async (req, res) => {
   const from = req.query.from || new Date(Date.now() - 24 * 3600 * 1000).toISOString();
@@ -134,7 +168,7 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.post('/test/trigger-alert', async (req, res) => {
+app.post('/test/trigger-alert', requirePassword, async (req, res) => {
   try {
     const message = await generateAlertMessage(Number(req.body.hours || NO_MOTION_ALERT_HOURS));
     await sendAlertEmail(message);
