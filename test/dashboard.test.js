@@ -3,7 +3,7 @@ process.env.DASHBOARD_PASSWORD = 'test-pass';
 const test = require('node:test');
 const assert = require('node:assert');
 const { app, store } = require('../index');
-const { STATUS_LABELS, FOOTER_LINES, missedPrompt } = require('../wording');
+const { STATUS_LABELS, FOOTER_LINES, missedPrompt, missedFallback } = require('../wording');
 
 const auth = { Authorization: 'Basic ' + Buffer.from('caregiver:test-pass').toString('base64') };
 
@@ -54,5 +54,7 @@ test('approved wording is exact', () => {
   assert.strictEqual(STATUS_LABELS.likely_taken, 'Activity seen near the pills (not a confirmation)');
   assert.strictEqual(STATUS_LABELS.not_confirmed, 'No activity seen near the pills - not confirmed');
   assert.strictEqual(FOOTER_LINES.length, 3);
+  assert.strictEqual(missedFallback('08:00', '07:45', '08:45'),
+    'No activity was seen near the pills between 07:45 and 08:45, so the 08:00 dose was possibly missed. This is only a motion sensor and cannot tell whether medicine was taken. Please check in with the person. - Ring Med Watch');
   assert.match(missedPrompt('08:00', '07:45', '08:45'), /Never suggest taking the dose late, taking a double dose or changing any medicine, and never name a medicine; only suggest checking in with the person\./);
 });

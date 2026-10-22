@@ -7,7 +7,7 @@ const { listDevices, verifySignature, parseWebhook } = require('./ring');
 const { createMemoryStore } = require('./store');
 const { createDynamoStore } = require('./store-dynamodb');
 const { validateSettings, evaluateDoses, checkDoses, dayBounds } = require('./doses');
-const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt } = require('./wording');
+const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback } = require('./wording');
 
 const app = express();
 // Keep the raw bytes: Ring's webhook signature is computed over them.
@@ -147,7 +147,14 @@ app.get('/api/doses', requirePassword, async (req, res) => {
 async function notifyPossiblyMissed(dose) {
   const { timezone } = await store.getSettings();
   const local = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
-  const message = await generateText(missedPrompt(dose.time, local(dose.windowStart), local(dose.windowEnd)));
+  const [start, end] = [local(dose.windowStart), local(dose.windowEnd)];
+  let message;
+  try {
+    message = await generateText(missedPrompt(dose.time, start, end));
+  } catch (err) {
+    console.error('AI message failed, using the fixed text:', err.message);
+    message = missedFallback(dose.time, start, end);
+  }
   await sendAlertEmail(message, MISSED_SUBJECT);
 }
 

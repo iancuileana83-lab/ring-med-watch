@@ -21,4 +21,9 @@ function missedPrompt(doseTime, windowStart, windowEnd) {
   return `Write a short, calm message (max 300 characters) to a family caregiver. No motion was seen near the pill area between ${windowStart} and ${windowEnd}, so the ${doseTime} dose was possibly missed. Motion does not prove a pill was taken, and no motion does not prove it was missed. Gently ask them to check in. Never say the dose was definitely missed. Do not give medical advice. Never suggest taking the dose late, taking a double dose or changing any medicine, and never name a medicine; only suggest checking in with the person. Sign it "- Ring Med Watch".`;
 }
 
-module.exports = { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt };
+// Used only if the AI writer is unavailable, so a possibly-missed dose is still reported.
+function missedFallback(doseTime, windowStart, windowEnd) {
+  return `No activity was seen near the pills between ${windowStart} and ${windowEnd}, so the ${doseTime} dose was possibly missed. This is only a motion sensor and cannot tell whether medicine was taken. Please check in with the person. - Ring Med Watch`;
+}
+
+module.exports = { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback };
