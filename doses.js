@@ -1,6 +1,8 @@
 // Dose-window logic. Motion near the pills is only a hint, never proof of a dose:
 // statuses are "likely_taken" / "not_confirmed", and callers must word them that way.
 
+const { newToken, hashToken } = require('./checkin');
+
 // Stand-in camera for demos when no Ring camera is available. It only ever receives simulated events.
 const DEMO_CAMERA_ID = 'demo-camera';
 
@@ -114,8 +116,10 @@ async function checkDoses({ store, notify, nowMs = Date.now() }) {
   const alerted = [];
   for (const dose of doses.filter((d) => d.status === 'not_confirmed')) {
     if ((await store.listAlerts(from, to)).some((a) => a.key === dose.key)) continue;
-    const sent = await notify(dose); // may return { subject, message } so the dashboard can preview the email
-    await store.recordAlert(dose.key, { sentAt: new Date(nowMs).toISOString(), doseTime: dose.time, ...(sent || {}) });
+    // One-time check-in token: the email carries it, only its hash is stored.
+    const token = newToken();
+    const sent = await notify(dose, { checkinToken: token }); // may return { subject, message } for the dashboard preview
+    await store.recordAlert(dose.key, { sentAt: new Date(nowMs).toISOString(), doseTime: dose.time, checkinHash: hashToken(token), ...(sent || {}) });
     alerted.push(dose.key);
   }
   return { doses, alerted };

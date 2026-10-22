@@ -6,6 +6,7 @@ function createMemoryStore() {
   let events = [];
   const seen = new Set();
   const alerts = new Map();
+  const dailySent = new Set();
   let settings = {
     doses: [],
     windowBeforeMinutes: 15,
@@ -49,8 +50,30 @@ function createMemoryStore() {
     async listAlerts(fromIso, toIso) {
       return [...alerts.values()]
         .filter((a) => a.sentAt >= fromIso && a.sentAt < toIso)
-        .map((a) => ({ ...a }))
+        .map(({ checkinHash, ...a }) => a) // the token hash never leaves the store
         .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
+    },
+    // "I checked in" links: look an alert up by the hash of its one-time token.
+    async findAlertByHash(hash) {
+      const a = [...alerts.values()].find((x) => x.checkinHash === hash);
+      return a ? { key: a.key, doseTime: a.doseTime, resolvedAt: a.resolvedAt || null } : null;
+    },
+    // status: 'resolved' (first use), 'already' (token used before), 'invalid' (unknown token)
+    async resolveAlertByHash(hash, nowIso) {
+      const a = [...alerts.values()].find((x) => x.checkinHash === hash);
+      if (!a) return { status: 'invalid' };
+      if (a.resolvedAt) return { status: 'already', doseTime: a.doseTime };
+      a.resolvedAt = nowIso;
+      return { status: 'resolved', doseTime: a.doseTime };
+    },
+    // Daily summary: at most one per local date. Release if sending fails so it can be retried.
+    async claimDaily(dateKey) {
+      if (dailySent.has(dateKey)) return false;
+      dailySent.add(dateKey);
+      return true;
+    },
+    async releaseDaily(dateKey) {
+      dailySent.delete(dateKey);
     },
     async getSettings() {
       return { ...settings };

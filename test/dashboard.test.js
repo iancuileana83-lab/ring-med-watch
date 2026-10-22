@@ -1,4 +1,6 @@
 process.env.DASHBOARD_PASSWORD = 'test-pass';
+process.env.STORAGE_BACKEND = ''; // always in-memory in tests
+process.env.RING_HMAC_KEY = '';
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -110,7 +112,7 @@ test('house status wording', () => {
   assert.strictEqual(lastActivitySummary('08:12', true), '08:12 at the camera near the pills');
 });
 
-test('demo camera: simulation works, is labelled, and never triggers alert emails', async () => {
+test('demo camera: simulation is labelled on the dashboard (alert emails are covered in phase4.test.js)', async () => {
   const server = app.listen(0);
   const base = `http://127.0.0.1:${server.address().port}`;
   const json = { ...auth, 'Content-Type': 'application/json' };
@@ -121,10 +123,6 @@ test('demo camera: simulation works, is labelled, and never triggers alert email
     const today = await (await fetch(`${base}/api/today`, { headers: auth })).json();
     assert.strictEqual(today.demoCamera, true);
     assert.ok(today.summary.last.endsWith('at the demo camera (simulation)'), today.summary.last);
-    // A dose window that already ended with no real motion would normally email; with the demo camera it must not.
-    const check = await (await fetch(`${base}/internal/check-doses`, { method: 'POST', headers: json, body: '{}' })).json();
-    assert.deepStrictEqual(check.alerted, []);
-    assert.strictEqual(check.skipped, 'demo camera');
     assert.strictEqual((await (await fetch(`${base}/api/week`, { headers: auth })).json()).demoCamera, true);
   } finally {
     await store.deleteSimulatedEvents();

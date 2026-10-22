@@ -30,7 +30,8 @@ const PRIVACY_LINES = [
   'Events and alert records are deleted automatically after 30 days.',
   'Events from the "Simulate motion" demo button are marked as simulations and can be removed at any time.',
   'The dashboard and the settings are protected by a password.',
-  'Alert emails are written by Amazon Bedrock. The only information sent to the model is the dose time and the dose window.'
+  'Each alert email has a one-time check-in link. Only a hash of its token is stored.',
+  "Alert emails and the daily summary are written by Amazon Bedrock. The only information sent to the model is dose times, dose windows, and for the daily summary each dose's status and the number of alerts sent and checked in."
 ];
 
 const UI = {
@@ -46,6 +47,9 @@ const UI = {
     badge: 'Simulation',
     clear: 'Remove simulated events'
   },
+  checkedIn: 'Checked in',
+  checkedInAt: 'Checked in at',
+  notCheckedIn: 'Not checked in yet',
   labelHint: 'Optional name for this dose, like Morning pills. Please do not enter medicine names.',
   demoCamera: 'Demo camera (simulation)'
 };
@@ -54,8 +58,8 @@ function dosesSummary(scheduled, seen, notConfirmed) {
   return `${scheduled} scheduled · ${seen} activity seen · ${notConfirmed} not confirmed`;
 }
 
-function alertsSummary(count) {
-  return `${count} today`;
+function alertsSummary(count, checkedIn = 0) {
+  return `${count} today · ${checkedIn} checked in`;
 }
 
 function lastActivitySummary(time, atChosenCamera, isDemoCamera = false) {
@@ -75,6 +79,52 @@ function houseStatus(hoursSinceMotion, thresholdHours) {
   return { level: 'normal', text: `Motion seen ${h} ${h === 1 ? 'hour' : 'hours'} ago` };
 }
 
+// "I checked in" link: text in the alert email and on the public confirm page.
+const CHECKIN = {
+  emailLine: (link) => `Checked in with them? Let the dashboard know: ${link}`,
+  heading: 'Checking in',
+  question: (doseTime) => `Did you check in with them about the ${doseTime} dose?`,
+  button: 'I checked in',
+  disclaimer: 'This does not confirm that medicine was taken.',
+  thanks: 'Thank you. This alert is now marked as checked in.',
+  already: 'This alert was already marked as checked in.',
+  invalid: 'This link is not valid or has expired.',
+  resolvedLabel: (time) => `Checked in at ${time}`
+};
+
+// Daily summary email.
+// Alerts raised from the Demo camera are real emails but clearly marked as simulated.
+// PROPOSED wording, pending the caregiver's approval.
+const DEMO_ALERT_SUFFIX = ' (simulation)';
+const DEMO_ALERT_NOTE = 'Note: this alert is based on the demo camera, so the data is simulated.';
+
+const SUMMARY_SUBJECT = 'Ring Med Watch: daily summary';
+const SIMULATED_NOTE = "Note: today's data includes simulated events.";
+
+const FACT_PHRASES = {
+  likely_taken: 'activity seen near the pills',
+  not_confirmed: 'not confirmed',
+  in_window: 'dose window still open',
+  upcoming: 'dose window not open yet',
+  no_camera: 'no camera chosen'
+};
+
+// facts: { doses: [{ time, status }], alertsSent, checkedIn }
+function summaryFactsText(facts) {
+  const doseLines = facts.doses.map((d) => `Dose ${d.time}: ${FACT_PHRASES[d.status]}`).join('; ');
+  return `${doseLines}. ${facts.alertsSent} alert emails sent, ${facts.checkedIn} checked in`;
+}
+
+function summaryPrompt(facts) {
+  return `Write a short, calm daily summary (max 500 characters) for a family caregiver, using only these facts: ${summaryFactsText(facts)}. For each dose say whether activity was seen near the pills or was not confirmed, or whether the dose window is still open. Mention how many alert emails were sent and how many were checked in. Never say a dose was definitely taken or definitely missed. Do not give medical advice. Never suggest taking a dose late, taking a double dose or changing any medicine, and never name a medicine. Sign it "- Ring Med Watch".`;
+}
+
+function summaryFallback(facts) {
+  const seen = facts.doses.filter((d) => d.status === 'likely_taken').length;
+  const notConfirmed = facts.doses.filter((d) => d.status === 'not_confirmed').length;
+  return `Today: ${facts.doses.length} doses scheduled, ${seen} with activity seen near the pills, ${notConfirmed} not confirmed. ${facts.alertsSent} alert emails sent, ${facts.checkedIn} checked in. This is only a motion sensor and cannot tell whether medicine was taken. - Ring Med Watch`;
+}
+
 // Used only if the AI writer is unavailable, so a possibly-missed dose is still reported.
 function missedFallback(doseTime, windowStart, windowEnd) {
   return `No activity was seen near the pills between ${windowStart} and ${windowEnd}, so the ${doseTime} dose was possibly missed. This is only a motion sensor and cannot tell whether medicine was taken. Please check in with the person. - Ring Med Watch`;
@@ -82,5 +132,6 @@ function missedFallback(doseTime, windowStart, windowEnd) {
 
 module.exports = {
   STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback,
+  CHECKIN, DEMO_ALERT_SUFFIX, DEMO_ALERT_NOTE, SUMMARY_SUBJECT, SIMULATED_NOTE, summaryFactsText, summaryPrompt, summaryFallback,
   NAV, PRIVACY_LINES, UI, dosesSummary, alertsSummary, lastActivitySummary, houseStatus
 };

@@ -6,8 +6,11 @@ const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 const { listDevices, verifySignature, parseWebhook } = require('./ring');
 const { createMemoryStore } = require('./store');
 const { createDynamoStore } = require('./store-dynamodb');
+const { hashToken, TOKEN_RE } = require('./checkin');
+const { runDailySummary } = require('./summary');
 const { DEMO_CAMERA_ID, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses, dayBounds } = require('./doses');
 const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback,
+  CHECKIN, SUMMARY_SUBJECT, DEMO_ALERT_SUFFIX, DEMO_ALERT_NOTE,
   NAV, PRIVACY_LINES, UI, dosesSummary, alertsSummary, lastActivitySummary, houseStatus } = require('./wording');
 
 const app = express();
@@ -46,14 +49,14 @@ async function generateAlertMessage(hoursSinceMotion) {
   return generateText(`Write a short, calm, non-alarming message (max 300 characters) to a family caregiver. No motion has been detected at their relative's front door for ${hoursSinceMotion.toFixed(1)} hours. Ask them to check in. Do not sound like an emergency. Sign it "- Ring Med Watch".`);
 }
 
-async function generateText(prompt) {
+async function generateText(prompt, maxTokens = 150) {
   const command = new InvokeModelCommand({
     modelId: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
     contentType: 'application/json',
     accept: 'application/json',
     body: JSON.stringify({
       anthropic_version: 'bedrock-2023-05-31',
-      max_tokens: 150,
+      max_tokens: maxTokens,
       messages: [{ role: 'user', content: prompt }]
     })
   });
@@ -63,14 +66,15 @@ async function generateText(prompt) {
   return body.content[0].text.trim();
 }
 
-async function sendAlertEmail(message, subject = 'Ring Med Watch Alert') {
+// extraLines (check-in link, simulation notes) go between the message and the approved footer.
+async function sendAlertEmail(message, subject = 'Ring Med Watch Alert', extraLines = []) {
   await ses.send(new SendEmailCommand({
     FromEmailAddress: ALERT_EMAIL,
     Destination: { ToAddresses: [ALERT_EMAIL] },
     Content: {
       Simple: {
         Subject: { Data: subject },
-        Body: { Text: { Data: `${message}\n\n--\n${FOOTER_LINES.join('\n')}` } }
+        Body: { Text: { Data: `${[message, ...extraLines].join('\n\n')}\n\n--\n${FOOTER_LINES.join('\n')}` } }
       }
     }
   }));
@@ -144,20 +148,32 @@ app.get('/api/doses', requirePassword, async (req, res) => {
   res.json({ doses: evaluateDoses(settings, await store.listEvents(from, to), Date.now()) });
 });
 
+// Overridable in tests so no real AI or email call is made.
+const deps = { generateText: (...a) => generateText(...a), sendAlertEmail: (...a) => sendAlertEmail(...a) };
+
+// Public address of this service, used for the "I checked in" link.
+const publicBase = (req) => (process.env.PUBLIC_BASE_URL || `https://${req.get('host')}`).replace(/\/+$/, '');
+
 // Called on a schedule (every few minutes). Throws if sending fails so the dose is retried.
-async function notifyPossiblyMissed(dose) {
-  const { timezone } = await store.getSettings();
+async function notifyPossiblyMissed(dose, { checkinToken, baseUrl } = {}) {
+  const { timezone, cameraId } = await store.getSettings();
   const local = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
   const [start, end] = [local(dose.windowStart), local(dose.windowEnd)];
   let message;
   try {
-    message = await generateText(missedPrompt(dose.time, start, end));
+    message = await deps.generateText(missedPrompt(dose.time, start, end));
   } catch (err) {
     console.error('AI message failed, using the fixed text:', err.message);
     message = missedFallback(dose.time, start, end);
   }
-  await sendAlertEmail(message, MISSED_SUBJECT);
-  return { subject: MISSED_SUBJECT, message };
+  const simulated = cameraId === DEMO_CAMERA_ID;
+  const subject = MISSED_SUBJECT + (simulated ? DEMO_ALERT_SUFFIX : '');
+  const stored = simulated ? `${message}\n\n${DEMO_ALERT_NOTE}` : message; // what the dashboard previews
+  const extra = [];
+  if (simulated) extra.push(DEMO_ALERT_NOTE);
+  if (checkinToken && baseUrl) extra.push(CHECKIN.emailLine(`${baseUrl}/checkin?t=${checkinToken}`));
+  await deps.sendAlertEmail(message, subject, extra);
+  return { subject, message: stored, ...(simulated ? { simulated: true } : {}) };
 }
 
 // The scheduler may use CRON_TOKEN (X-Cron-Token header) instead of the dashboard password,
@@ -171,13 +187,65 @@ function requireCronOrPassword(req, res, next) {
 
 app.post('/internal/check-doses', requireCronOrPassword, async (req, res) => {
   try {
-    // The demo camera is a simulation: never email the caregiver about a "missed" dose from it.
-    const settings = await store.getSettings();
-    if (settings.cameraId === DEMO_CAMERA_ID) return res.json({ doses: [], alerted: [], skipped: 'demo camera' });
-    res.json(await checkDoses({ store, notify: notifyPossiblyMissed }));
+    const baseUrl = publicBase(req);
+    res.json(await checkDoses({ store, notify: (dose, ctx) => notifyPossiblyMissed(dose, { ...ctx, baseUrl }) }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Once a day (Cloud Scheduler, 20:30 Europe/Bucharest). Skipped if no doses are set or already sent today.
+app.post('/internal/daily-summary', requireCronOrPassword, async (req, res) => {
+  try {
+    res.json(await runDailySummary({
+      store,
+      generate: (prompt) => deps.generateText(prompt, 300),
+      send: (message, extra) => deps.sendAlertEmail(message, SUMMARY_SUBJECT, extra)
+    }));
+  } catch (err) {
+    console.error('Daily summary failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---- "I checked in" (public: the one-time token in the link is the only credential) ----
+const escapeHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function checkinPage(res, status, bodyHtml) {
+  res.status(status)
+    .set({
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+      'X-Robots-Tag': 'noindex',
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"
+    })
+    .send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Ring Med Watch</title>
+<style>body{margin:0;background:#fbf6ef;color:#2b2622;font:16px/1.5 system-ui,sans-serif}main{max-width:520px;margin:0 auto;padding:24px 16px}.card{background:#fffdf9;border:1px solid #eadfce;border-radius:16px;padding:20px}h1{font-size:1.3rem;margin:0 0 8px}button{font:inherit;font-weight:700;background:#1f7a6d;color:#fff;border:0;border-radius:10px;padding:12px 18px;min-height:44px;cursor:pointer}.muted{color:#6d6359;font-size:.9rem}footer{margin-top:16px;color:#6d6359;font-size:.85rem}@media (prefers-color-scheme:dark){body{background:#171411;color:#f1e9de}.card{background:#211d19;border-color:#342d26}.muted,footer{color:#b0a597}button{background:#5fc2b1;color:#0f2a25}}</style></head>
+<body><main><div class="card">${bodyHtml}</div><footer>${FOOTER_LINES.map((l) => `<p>${escapeHtml(l)}</p>`).join('')}</footer></main></body></html>`);
+}
+
+const tokenFrom = (value) => (typeof value === 'string' && TOKEN_RE.test(value) ? value : null);
+const invalidPage = (res) => checkinPage(res, 404, `<h1>${escapeHtml(CHECKIN.heading)}</h1><p>${escapeHtml(CHECKIN.invalid)}</p>`);
+
+// GET only shows a confirm button: mail scanners that open links must not resolve the alert.
+app.get('/checkin', async (req, res) => {
+  const token = tokenFrom(req.query.t);
+  const alert = token && await store.findAlertByHash(hashToken(token));
+  if (!alert) return invalidPage(res);
+  if (alert.resolvedAt) return checkinPage(res, 200, `<h1>${escapeHtml(CHECKIN.heading)}</h1><p>${escapeHtml(CHECKIN.already)}</p>`);
+  checkinPage(res, 200, `<h1>${escapeHtml(CHECKIN.heading)}</h1><p>${escapeHtml(CHECKIN.question(alert.doseTime))}</p>
+<form method="post" action="/checkin"><input type="hidden" name="t" value="${escapeHtml(token)}"><button type="submit">${escapeHtml(CHECKIN.button)}</button></form>
+<p class="muted">${escapeHtml(CHECKIN.disclaimer)}</p>`);
+});
+
+app.post('/checkin', express.urlencoded({ extended: false, limit: '2kb' }), async (req, res) => {
+  const token = tokenFrom(req.body && req.body.t);
+  if (!token) return invalidPage(res);
+  const result = await store.resolveAlertByHash(hashToken(token), new Date().toISOString());
+  if (result.status === 'invalid') return invalidPage(res);
+  const text = result.status === 'resolved' ? CHECKIN.thanks : CHECKIN.already;
+  checkinPage(res, 200, `<h1>${escapeHtml(CHECKIN.heading)}</h1><p>${escapeHtml(text)}</p><p class="muted">${escapeHtml(CHECKIN.disclaimer)}</p>`);
 });
 
 // Local time of day, HH:MM, for dashboard summaries.
@@ -199,18 +267,19 @@ app.get('/api/today', requirePassword, async (req, res) => {
   const events = await store.listEvents(from, to);
   const doses = evaluateDoses(settings, events, now);
   const alerts = await store.listAlerts(from, to);
+  const resolvedKeys = new Set(alerts.filter((a) => a.resolvedAt).map((a) => a.key));
   const lastNear = [...events].reverse().find((e) => e.type === 'motion_detected' && e.deviceId === settings.cameraId);
   res.json({
     date,
     timezone: settings.timezone,
     cameraId: settings.cameraId,
     demoCamera: settings.cameraId === DEMO_CAMERA_ID,
-    doses,
+    doses: doses.map((d) => (resolvedKeys.has(d.key) ? { ...d, checkedIn: true } : d)),
     events,
     alerts,
     summary: {
       doses: dosesSummary(doses.length, doses.filter((d) => d.status === 'likely_taken').length, doses.filter((d) => d.status === 'not_confirmed').length),
-      alerts: alertsSummary(alerts.length),
+      alerts: alertsSummary(alerts.length, resolvedKeys.size),
       last: lastActivitySummary(lastNear ? clock(lastNear.time, settings.timezone) : null, true, settings.cameraId === DEMO_CAMERA_ID),
       house: houseStatus(await hoursSinceLastMotion(now), NO_MOTION_ALERT_HOURS)
     },
@@ -291,4 +360,4 @@ if (require.main === module) {
   app.listen(PORT, () => console.log(`Ring Med Watch listening on port ${PORT}`));
 }
 
-module.exports = { app, store };
+module.exports = { app, store, deps };

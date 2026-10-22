@@ -292,6 +292,7 @@ function renderToday(d) {
     li.append(el('span', 't', x.time));
     const g = el('span', 'grow'); g.append(el('div', 'name', doseName(x)));
     li.append(g, statusPill(x.status));
+    if (x.checkedIn) { const c = el('span', 'pill likely_taken'); c.append(icon('check'), document.createTextNode(wording.ui.checkedIn)); li.append(c); }
     return li;
   }));
 
@@ -386,6 +387,9 @@ async function loadAlerts() {
     const s = el('section', 'panel');
     const top = el('div'); top.style.display = 'flex'; top.style.gap = '10px'; top.style.alignItems = 'center'; top.style.flexWrap = 'wrap';
     top.append(icon('alerts'), el('span', 'name', `${dayOf(a.sentAt, r.timezone)}, ${timeOf(a.sentAt, r.timezone)}`), el('span', 'pill not_confirmed', `${a.doseTime} dose - possibly missed`));
+    if (a.simulated) top.append(el('span', 'pill sim', wording.ui.simulate.badge));
+    if (a.resolvedAt) { const c = el('span', 'pill likely_taken'); c.append(icon('check'), document.createTextNode(`${wording.ui.checkedInAt} ${timeOf(a.resolvedAt, r.timezone)}`)); top.append(c); }
+    else top.append(el('span', 'pill', wording.ui.notCheckedIn));
     top.firstChild.style.cssText = 'width:22px;height:22px;color:var(--warn)';
     s.append(top);
     if (a.message) {

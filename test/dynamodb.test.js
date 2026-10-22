@@ -26,6 +26,15 @@ function fakeDynamo({ pageSize = 1000 } = {}) {
         case 'DeleteCommand':
           table.delete(k(i.Key.pk, i.Key.sk));
           return {};
+        case 'UpdateCommand': {
+          const item = table.get(k(i.Key.pk, i.Key.sk));
+          if (!item) { const e = new Error('missing'); e.name = 'ConditionalCheckFailedException'; throw e; }
+          if (i.ConditionExpression === 'attribute_not_exists(resolvedAt)' && item.resolvedAt) {
+            const e = new Error('resolved'); e.name = 'ConditionalCheckFailedException'; throw e;
+          }
+          item.resolvedAt = i.ExpressionAttributeValues[':t'];
+          return {};
+        }
         case 'GetCommand':
           return { Item: table.get(k(i.Key.pk, i.Key.sk)) };
         case 'QueryCommand': {
@@ -37,7 +46,8 @@ function fakeDynamo({ pageSize = 1000 } = {}) {
           const page = items.slice(start, start + pageSize);
           const more = start + pageSize < items.length;
           const result = { Items: page, ...(more ? { LastEvaluatedKey: { pk: v[':pk'], sk: page[page.length - 1].sk } } : {}) };
-          if (i.FilterExpression === 'simulated = :t') result.Items = result.Items.filter((x) => x.simulated === true);
+          if (i.FilterExpression === 'checkinHash = :h') result.Items = result.Items.filter((x) => x.checkinHash === v[':h']);
+          else if (i.FilterExpression === 'simulated = :t') result.Items = result.Items.filter((x) => x.simulated === true);
           else if (i.FilterExpression) result.Items = result.Items.filter((x) => x.sentAt >= v[':a'] && x.sentAt < v[':b']);
           return result;
         }
@@ -117,4 +127,41 @@ test('alert email text is stored and returned', async () => {
   const [a] = await store.listAlerts('2026-10-22T00:00:00.000Z', '2026-10-23T00:00:00.000Z');
   assert.strictEqual(a.subject, 'S');
   assert.strictEqual(a.message, 'M');
+});
+
+test('check-in: lookup by token hash, one-time resolve, hash never listed', async () => {
+  const { client, store } = make();
+  await store.recordAlert('2026-10-22T08:00', { sentAt: '2026-10-22T06:00:00.000Z', doseTime: '08:00', checkinHash: 'h1', simulated: true });
+  await store.recordAlert('2026-10-22T20:00', { sentAt: '2026-10-22T18:00:00.000Z', doseTime: '20:00', checkinHash: 'h2' });
+  assert.deepStrictEqual(await store.findAlertByHash('h1'), { key: '2026-10-22T08:00', doseTime: '08:00', resolvedAt: null });
+  assert.strictEqual(await store.findAlertByHash('nope'), null);
+  assert.deepStrictEqual(await store.resolveAlertByHash('nope', 'now'), { status: 'invalid' });
+  assert.deepStrictEqual(await store.resolveAlertByHash('h1', '2026-10-22T07:00:00.000Z'), { status: 'resolved', doseTime: '08:00' });
+  assert.deepStrictEqual(await store.resolveAlertByHash('h1', '2026-10-22T07:05:00.000Z'), { status: 'already', doseTime: '08:00' });
+  const listed = await store.listAlerts('2026-10-22T00:00:00.000Z', '2026-10-23T00:00:00.000Z');
+  assert.strictEqual(listed[0].resolvedAt, '2026-10-22T07:00:00.000Z');
+  assert.strictEqual(listed[0].simulated, true);
+  assert.strictEqual(listed[1].resolvedAt, undefined);
+  assert.ok(!JSON.stringify(listed).includes('checkinHash'));
+  assert.ok(client.calls.some((c) => c.type === 'UpdateCommand'));
+});
+
+test('a racing second click loses the conditional update', async () => {
+  const { client, store } = make();
+  await store.recordAlert('k', { sentAt: '2026-10-22T06:00:00.000Z', doseTime: '08:00', checkinHash: 'h' });
+  // Simulate another request resolving it between our read and our write.
+  const realSend = client.send.bind(client);
+  client.send = async (cmd) => {
+    if (cmd.constructor.name === 'UpdateCommand') client.table.get('ALERT\u0000k').resolvedAt = 'someone-else';
+    return realSend(cmd);
+  };
+  assert.deepStrictEqual(await store.resolveAlertByHash('h', 'now'), { status: 'already', doseTime: '08:00' });
+});
+
+test('daily summary marker: claim once, release to retry', async () => {
+  const { store } = make();
+  assert.strictEqual(await store.claimDaily('2026-10-22'), true);
+  assert.strictEqual(await store.claimDaily('2026-10-22'), false);
+  await store.releaseDaily('2026-10-22');
+  assert.strictEqual(await store.claimDaily('2026-10-22'), true);
 });

@@ -7,7 +7,7 @@
 //   SETTINGS / CURRENT                          caregiver settings
 
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, DeleteCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 
 const TTL_SECONDS = 30 * 24 * 3600;
 const DEFAULT_SETTINGS = {
@@ -113,8 +113,59 @@ function createDynamoStore({ tableName, region, client, defaultTimezone = 'UTC' 
         ExpressionAttributeValues: { ':pk': 'ALERT', ':a': fromIso, ':b': toIso }
       });
       return items
-        .map(({ sk, sentAt, doseTime, subject, message }) => ({ key: sk, sentAt, doseTime, ...(subject ? { subject } : {}), ...(message ? { message } : {}) }))
+        .map(({ sk, sentAt, doseTime, subject, message, resolvedAt, simulated }) => ({
+          key: sk, sentAt, doseTime,
+          ...(subject ? { subject } : {}), ...(message ? { message } : {}),
+          ...(resolvedAt ? { resolvedAt } : {}), ...(simulated ? { simulated: true } : {})
+        }))
         .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
+    },
+
+    async findAlertByHash(hash) {
+      const [item] = await queryAll({
+        KeyConditionExpression: 'pk = :pk',
+        FilterExpression: 'checkinHash = :h',
+        ExpressionAttributeValues: { ':pk': 'ALERT', ':h': hash }
+      });
+      return item ? { key: item.sk, doseTime: item.doseTime, resolvedAt: item.resolvedAt || null } : null;
+    },
+
+    // The conditional update makes the token one-time even if two clicks arrive together.
+    async resolveAlertByHash(hash, nowIso) {
+      const found = await this.findAlertByHash(hash);
+      if (!found) return { status: 'invalid' };
+      if (found.resolvedAt) return { status: 'already', doseTime: found.doseTime };
+      try {
+        await db.send(new UpdateCommand({
+          TableName: tableName,
+          Key: { pk: 'ALERT', sk: found.key },
+          UpdateExpression: 'SET resolvedAt = :t',
+          ConditionExpression: 'attribute_not_exists(resolvedAt)',
+          ExpressionAttributeValues: { ':t': nowIso }
+        }));
+        return { status: 'resolved', doseTime: found.doseTime };
+      } catch (err) {
+        if (isConditionFailure(err)) return { status: 'already', doseTime: found.doseTime };
+        throw err;
+      }
+    },
+
+    async claimDaily(dateKey) {
+      try {
+        await db.send(new PutCommand({
+          TableName: tableName,
+          Item: { pk: 'SUMMARY', sk: dateKey, ttl: Math.floor(Date.now() / 1000) + TTL_SECONDS },
+          ConditionExpression: 'attribute_not_exists(pk)'
+        }));
+        return true;
+      } catch (err) {
+        if (isConditionFailure(err)) return false;
+        throw err;
+      }
+    },
+
+    async releaseDaily(dateKey) {
+      await db.send(new DeleteCommand({ TableName: tableName, Key: { pk: 'SUMMARY', sk: dateKey } }));
     },
 
     async getSettings() {

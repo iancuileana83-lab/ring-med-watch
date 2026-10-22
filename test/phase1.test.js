@@ -1,5 +1,6 @@
 process.env.DASHBOARD_PASSWORD = 'test-pass';
-delete process.env.RING_HMAC_KEY;
+process.env.RING_HMAC_KEY = ''; // .env may hold a real key; empty means "do not verify"
+process.env.STORAGE_BACKEND = ''; // always in-memory in tests
 
 const test = require('node:test');
 const assert = require('node:assert');
