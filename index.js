@@ -6,6 +6,7 @@ const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 const { listDevices, verifySignature, parseWebhook } = require('./ring');
 const { createMemoryStore } = require('./store');
 const { validateSettings, evaluateDoses, checkDoses, dayBounds } = require('./doses');
+const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt } = require('./wording');
 
 const app = express();
 // Keep the raw bytes: Ring's webhook signature is computed over them.
@@ -37,8 +38,10 @@ const bedrock = new BedrockRuntimeClient({ region: 'us-east-1' });
 const ses = new SESv2Client({ region: 'us-east-1' });
 
 async function generateAlertMessage(hoursSinceMotion) {
-  const prompt = `Write a short, calm, non-alarming message (max 300 characters) to a family caregiver. No motion has been detected at their relative's front door for ${hoursSinceMotion.toFixed(1)} hours. Ask them to check in. Do not sound like an emergency. Sign it "- Ring Med Watch".`;
+  return generateText(`Write a short, calm, non-alarming message (max 300 characters) to a family caregiver. No motion has been detected at their relative's front door for ${hoursSinceMotion.toFixed(1)} hours. Ask them to check in. Do not sound like an emergency. Sign it "- Ring Med Watch".`);
+}
 
+async function generateText(prompt) {
   const command = new InvokeModelCommand({
     modelId: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
     contentType: 'application/json',
@@ -55,14 +58,14 @@ async function generateAlertMessage(hoursSinceMotion) {
   return body.content[0].text.trim();
 }
 
-async function sendAlertEmail(message) {
+async function sendAlertEmail(message, subject = 'Ring Med Watch Alert') {
   await ses.send(new SendEmailCommand({
     FromEmailAddress: ALERT_EMAIL,
     Destination: { ToAddresses: [ALERT_EMAIL] },
     Content: {
       Simple: {
-        Subject: { Data: 'Ring Med Watch Alert' },
-        Body: { Text: { Data: message } }
+        Subject: { Data: subject },
+        Body: { Text: { Data: `${message}\n\n--\n${FOOTER_LINES.join('\n')}` } }
       }
     }
   }));
@@ -136,10 +139,12 @@ app.get('/api/doses', requirePassword, async (req, res) => {
   res.json({ doses: evaluateDoses(settings, await store.listEvents(from, to), Date.now()) });
 });
 
-// Called on a schedule (every few minutes). Alert wording is still pending the
-// caregiver's approval, so for now a missed window is only logged, not emailed.
+// Called on a schedule (every few minutes). Throws if sending fails so the dose is retried.
 async function notifyPossiblyMissed(dose) {
-  console.log('Dose window ended without motion:', dose.key, '(alert wording pending approval, no email sent)');
+  const { timezone } = await store.getSettings();
+  const local = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+  const message = await generateText(missedPrompt(dose.time, local(dose.windowStart), local(dose.windowEnd)));
+  await sendAlertEmail(message, MISSED_SUBJECT);
 }
 
 app.post('/internal/check-doses', requirePassword, async (req, res) => {
@@ -148,6 +153,28 @@ app.post('/internal/check-doses', requirePassword, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Everything the dashboard shows, in one call: today's doses, events, alerts and approved wording.
+app.get('/api/today', requirePassword, async (req, res) => {
+  const settings = await store.getSettings();
+  const now = Date.now();
+  const { date, from, to } = dayBounds(now, settings.timezone);
+  const events = await store.listEvents(from, to);
+  res.json({
+    date,
+    timezone: settings.timezone,
+    cameraId: settings.cameraId,
+    doses: evaluateDoses(settings, events, now),
+    events,
+    alerts: await store.listAlerts(from, to),
+    statusLabels: STATUS_LABELS,
+    footer: FOOTER_LINES
+  });
+});
+
+app.get('/', requirePassword, (req, res) => {
+  res.sendFile(require('path').join(__dirname, 'public', 'dashboard.html'));
 });
 
 // Today's recorded events (time, type, device only).

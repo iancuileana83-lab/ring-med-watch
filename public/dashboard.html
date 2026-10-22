@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ring Med Watch</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1c2430; --muted:#5b6675; --line:#dfe3e8; --accent:#2457c5; --ok:#1f7a4d; --warn:#9a5b00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12161c; --card:#1b212a; --text:#e6e9ee; --muted:#9aa5b4; --line:#2c3541; --accent:#7aa2f7; --ok:#5fcf9a; --warn:#f0b35a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:16px; }
+  h1 { font-size:1.4rem; margin:8px 0 2px; }
+  h2 { font-size:1.05rem; margin:0 0 10px; }
+  .sub { color:var(--muted); margin:0 0 16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  ul { list-style:none; margin:0; padding:0; }
+  li { display:flex; gap:12px; padding:8px 0; border-top:1px solid var(--line); }
+  li:first-child { border-top:0; }
+  .t { min-width:52px; font-variant-numeric:tabular-nums; color:var(--muted); }
+  .likely_taken .what { color:var(--ok); }
+  .not_confirmed .what, .alert .what { color:var(--warn); }
+  .empty { color:var(--muted); }
+  label { display:block; margin:10px 0 4px; font-weight:600; }
+  input, select, button { font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--text); }
+  button { background:var(--accent); border-color:var(--accent); color:#fff; cursor:pointer; }
+  button.plain { background:transparent; color:var(--accent); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:6px; }
+  .msg { margin-top:10px; min-height:1.4em; color:var(--muted); }
+  footer { color:var(--muted); font-size:.9rem; padding-bottom:24px; }
+  footer p { margin:6px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Ring Med Watch</h1>
+  <p class="sub" id="sub">Loading...</p>
+
+  <section>
+    <h2>Today's doses</h2>
+    <ul id="doses"></ul>
+  </section>
+
+  <section>
+    <h2>Today's timeline</h2>
+    <ul id="timeline"></ul>
+  </section>
+
+  <section>
+    <h2>Settings</h2>
+    <form id="form">
+      <label>Dose times</label>
+      <div id="doseInputs"></div>
+      <button type="button" class="plain" id="addDose">+ Add a time</button>
+
+      <label for="camera">Camera near the pills</label>
+      <select id="camera"></select>
+
+      <div class="row">
+        <div><label for="before">Minutes before the dose time</label><input id="before" type="number" min="0" max="180"></div>
+        <div><label for="after">Minutes after the dose time</label><input id="after" type="number" min="0" max="180"></div>
+      </div>
+
+      <label for="tz">Timezone</label>
+      <input id="tz" type="text" placeholder="Europe/Bucharest">
+
+      <p><button type="submit">Save settings</button></p>
+      <div class="msg" id="msg" role="status"></div>
+    </form>
+  </section>
+
+  <footer id="footer"></footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let current = null;
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+  return body;
+}
+
+function timeOf(iso, tz) {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+}
+
+function item(time, text, cls) {
+  const li = document.createElement('li');
+  if (cls) li.className = cls;
+  const t = document.createElement('span'); t.className = 't'; t.textContent = time;
+  const w = document.createElement('span'); w.className = 'what'; w.textContent = text;
+  li.append(t, w);
+  return li;
+}
+
+function empty(list, text) {
+  const li = document.createElement('li'); li.className = 'empty'; li.textContent = text; list.replaceChildren(li);
+}
+
+function render(d) {
+  current = d;
+  $('sub').textContent = `${d.date} (${d.timezone})`;
+
+  const doses = $('doses');
+  if (!d.doses.length) empty(doses, 'No dose times set yet. Add them in Settings below.');
+  else doses.replaceChildren(...d.doses.map((x) => item(x.time, d.statusLabels[x.status], x.status)));
+
+  const rows = [];
+  for (const x of d.doses) rows.push({ at: x.windowStart, el: item(timeOf(x.windowStart, d.timezone), `Dose window ${x.time} opens`) });
+  for (const e of d.events) {
+    const near = e.deviceId === d.cameraId;
+    const kind = e.type === 'motion_detected' ? 'Motion' : e.type;
+    rows.push({ at: e.time, el: item(timeOf(e.time, d.timezone), `${kind} - ${near ? 'camera near the pills' : 'other camera'}`) });
+  }
+  for (const a of d.alerts) rows.push({ at: a.sentAt, el: item(timeOf(a.sentAt, d.timezone), `Alert email sent for the ${a.doseTime} dose`, 'alert') });
+  rows.sort((a, b) => a.at.localeCompare(b.at));
+  if (!rows.length) empty($('timeline'), 'Nothing recorded yet today.');
+  else $('timeline').replaceChildren(...rows.map((r) => r.el));
+
+  $('footer').replaceChildren(...d.footer.map((line) => { const p = document.createElement('p'); p.textContent = line; return p; }));
+}
+
+function addDoseInput(value = '') {
+  const row = document.createElement('div'); row.className = 'row';
+  const input = document.createElement('input'); input.type = 'time'; input.value = value; input.required = true; input.setAttribute('aria-label', 'Dose time');
+  const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'plain'; rm.textContent = 'Remove';
+  rm.onclick = () => row.remove();
+  row.append(input, rm);
+  $('doseInputs').append(row);
+}
+
+async function loadSettings() {
+  const s = await api('/api/settings');
+  $('doseInputs').replaceChildren();
+  s.doses.forEach((x) => addDoseInput(x.time));
+  $('before').value = s.windowBeforeMinutes;
+  $('after').value = s.windowAfterMinutes;
+  $('tz').value = s.timezone;
+
+  const sel = $('camera');
+  sel.replaceChildren(new Option('No camera chosen', ''));
+  let ids = new Set();
+  try {
+    (await api('/api/devices')).devices.forEach((dev) => { sel.append(new Option(dev.name, dev.id)); ids.add(dev.id); });
+  } catch (err) {
+    $('msg').textContent = `Could not list Ring cameras: ${err.message}`;
+  }
+  if (s.cameraId && !ids.has(s.cameraId)) sel.append(new Option(s.cameraId, s.cameraId));
+  sel.value = s.cameraId || '';
+}
+
+$('addDose').onclick = () => addDoseInput();
+
+$('form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  $('msg').textContent = 'Saving...';
+  try {
+    await api('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        doses: [...document.querySelectorAll('#doseInputs input')].map((i) => i.value),
+        cameraId: $('camera').value || null,
+        windowBeforeMinutes: Number($('before').value),
+        windowAfterMinutes: Number($('after').value),
+        timezone: $('tz').value.trim()
+      })
+    });
+    $('msg').textContent = 'Saved.';
+    await refresh();
+  } catch (err) {
+    $('msg').textContent = err.message;
+  }
+};
+
+async function refresh() {
+  try { render(await api('/api/today')); } catch (err) { $('sub').textContent = err.message; }
+}
+
+refresh();
+loadSettings();
+setInterval(refresh, 60000);
+</script>
+</body>
+</html>
