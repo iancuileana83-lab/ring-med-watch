@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { zonedToUtcMs, dayBounds, validateSettings, evaluateDoses, checkDoses } = require('../doses');
+const { zonedToUtcMs, dayBounds, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses } = require('../doses');
 const { createMemoryStore } = require('../store');
 
 const TZ = 'Europe/Bucharest';
@@ -65,9 +65,35 @@ test('no alert when motion was seen in the window', async () => {
 });
 
 test('validateSettings accepts good input and rejects bad input', () => {
-  assert.deepStrictEqual(validateSettings({ doses: ['20:00', '08:00', '08:00'] }).doses, [{ time: '08:00' }, { time: '20:00' }]);
+  assert.deepStrictEqual(validateSettings({ doses: ['20:00', '08:00', '08:00'] }).doses, [{ time: '08:00', label: '' }, { time: '20:00', label: '' }]);
+  assert.deepStrictEqual(validateSettings({ doses: [{ time: '08:00', label: '  Morning pills ' }] }).doses, [{ time: '08:00', label: 'Morning pills' }]);
+  assert.throws(() => validateSettings({ doses: [{ time: '08:00', label: 'x'.repeat(31) }] }));
   assert.throws(() => validateSettings({ doses: ['8:00'] }));
   assert.throws(() => validateSettings({ doses: new Array(7).fill('08:00') }));
   assert.throws(() => validateSettings({ windowAfterMinutes: 999 }));
   assert.throws(() => validateSettings({ timezone: 'Mars/Base' }));
+});
+
+test('evaluateWeek gives 7 days oldest first, judging past days at their end', () => {
+  const settings = { ...base, doses: [{ time: '08:00', label: 'Morning pills' }] };
+  const events = [motion('2026-10-20T05:10:00Z'), motion('2026-10-22T05:10:00Z')];
+  const week = evaluateWeek(settings, events, at('2026-10-22T09:00:00Z'));
+  assert.strictEqual(week.length, 7);
+  assert.strictEqual(week[0].date, '2026-10-16');
+  assert.strictEqual(week[6].date, '2026-10-22');
+  const status = Object.fromEntries(week.map((d) => [d.date, d.doses[0].status]));
+  assert.strictEqual(status['2026-10-20'], 'likely_taken');
+  assert.strictEqual(status['2026-10-21'], 'not_confirmed');
+  assert.strictEqual(status['2026-10-22'], 'likely_taken');
+  assert.strictEqual(week[6].doses[0].label, 'Morning pills');
+  assert.strictEqual(weekStartIso(at('2026-10-22T09:00:00Z'), TZ), new Date(zonedToUtcMs('2026-10-16', '00:00', TZ)).toISOString());
+});
+
+test('checkDoses keeps the email text returned by notify', async () => {
+  const store = createMemoryStore();
+  await store.saveSettings(base);
+  await checkDoses({ store, notify: async () => ({ subject: 'S', message: 'M' }), nowMs: at('2026-10-22T06:00:00Z') });
+  const [a] = await store.listAlerts('2026-10-22T00:00:00Z', '2026-10-23T00:00:00Z');
+  assert.strictEqual(a.subject, 'S');
+  assert.strictEqual(a.message, 'M');
 });

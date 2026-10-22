@@ -23,6 +23,9 @@ function fakeDynamo({ pageSize = 1000 } = {}) {
           table.set(k(i.Item.pk, i.Item.sk), { ...i.Item });
           return {};
         }
+        case 'DeleteCommand':
+          table.delete(k(i.Key.pk, i.Key.sk));
+          return {};
         case 'GetCommand':
           return { Item: table.get(k(i.Key.pk, i.Key.sk)) };
         case 'QueryCommand': {
@@ -34,7 +37,8 @@ function fakeDynamo({ pageSize = 1000 } = {}) {
           const page = items.slice(start, start + pageSize);
           const more = start + pageSize < items.length;
           const result = { Items: page, ...(more ? { LastEvaluatedKey: { pk: v[':pk'], sk: page[page.length - 1].sk } } : {}) };
-          if (i.FilterExpression) result.Items = result.Items.filter((x) => x.sentAt >= v[':a'] && x.sentAt < v[':b']);
+          if (i.FilterExpression === 'simulated = :t') result.Items = result.Items.filter((x) => x.simulated === true);
+          else if (i.FilterExpression) result.Items = result.Items.filter((x) => x.sentAt >= v[':a'] && x.sentAt < v[':b']);
           return result;
         }
         default:
@@ -92,4 +96,25 @@ test('settings: defaults first, then saved values merge over them', async () => 
 test('other errors are not swallowed', async () => {
   const store = createDynamoStore({ tableName: 'test-table', client: { send: async () => { const e = new Error('denied'); e.name = 'AccessDeniedException'; throw e; } } });
   await assert.rejects(store.addEvent(ev('x', '2026-10-22T08:00:00.000Z')), /denied/);
+});
+
+test('simulated events are flagged, listed, and removed without touching real ones', async () => {
+  const { client, store } = make();
+  const now = new Date().toISOString();
+  await store.addEvent({ ...ev('real', now) });
+  await store.addEvent({ ...ev('sim', now), simulated: true });
+  const before = await store.listEvents(new Date(Date.now() - 3600000).toISOString(), new Date(Date.now() + 3600000).toISOString());
+  assert.deepStrictEqual(before.map((e) => [e.id, !!e.simulated]), [['real', false], ['sim', true]].sort());
+  assert.strictEqual(await store.deleteSimulatedEvents(), 1);
+  const after = await store.listEvents(new Date(Date.now() - 3600000).toISOString(), new Date(Date.now() + 3600000).toISOString());
+  assert.deepStrictEqual(after.map((e) => e.id), ['real']);
+  assert.ok(client.calls.some((c) => c.type === 'DeleteCommand'));
+});
+
+test('alert email text is stored and returned', async () => {
+  const { store } = make();
+  await store.recordAlert('2026-10-22T08:00', { sentAt: '2026-10-22T06:00:00.000Z', doseTime: '08:00', subject: 'S', message: 'M' });
+  const [a] = await store.listAlerts('2026-10-22T00:00:00.000Z', '2026-10-23T00:00:00.000Z');
+  assert.strictEqual(a.subject, 'S');
+  assert.strictEqual(a.message, 'M');
 });

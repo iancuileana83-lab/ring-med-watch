@@ -47,9 +47,14 @@ function validateSettings(input) {
   const out = {};
   if (input.doses !== undefined) {
     if (!Array.isArray(input.doses) || input.doses.length > 6) throw new Error('doses must be a list of at most 6 times');
-    const times = input.doses.map((d) => (typeof d === 'string' ? d : d?.time));
-    if (!times.every((t) => TIME_RE.test(t))) throw new Error('each dose time must look like 08:00');
-    out.doses = [...new Set(times)].sort().map((time) => ({ time }));
+    const items = input.doses.map((d) => (typeof d === 'string' ? { time: d } : { time: d?.time, label: d?.label }));
+    if (!items.every((d) => TIME_RE.test(d.time))) throw new Error('each dose time must look like 08:00');
+    if (!items.every((d) => d.label === undefined || d.label === null || (typeof d.label === 'string' && d.label.trim().length <= 30))) {
+      throw new Error('a dose name can be at most 30 characters');
+    }
+    const byTime = new Map();
+    for (const d of items) if (!byTime.has(d.time)) byTime.set(d.time, d.label ? d.label.trim() : '');
+    out.doses = [...byTime.keys()].sort().map((time) => ({ time, label: byTime.get(time) }));
   }
   for (const k of ['windowBeforeMinutes', 'windowAfterMinutes']) {
     if (input[k] !== undefined) {
@@ -72,7 +77,7 @@ function validateSettings(input) {
 function evaluateDoses(settings, events, nowMs) {
   const tz = settings.timezone;
   const { date } = dayBounds(nowMs, tz);
-  return settings.doses.map(({ time }) => {
+  return settings.doses.map(({ time, label }) => {
     const doseMs = zonedToUtcMs(date, time, tz);
     const startMs = doseMs - settings.windowBeforeMinutes * 60000;
     const endMs = doseMs + settings.windowAfterMinutes * 60000;
@@ -88,6 +93,7 @@ function evaluateDoses(settings, events, nowMs) {
     return {
       key: `${date}T${time}`,
       time,
+      label: label || '',
       windowStart: new Date(startMs).toISOString(),
       windowEnd: new Date(endMs).toISOString(),
       motionCount: motion.length,
@@ -105,11 +111,36 @@ async function checkDoses({ store, notify, nowMs = Date.now() }) {
   const alerted = [];
   for (const dose of doses.filter((d) => d.status === 'not_confirmed')) {
     if ((await store.listAlerts(from, to)).some((a) => a.key === dose.key)) continue;
-    await notify(dose);
-    await store.recordAlert(dose.key, { sentAt: new Date(nowMs).toISOString(), doseTime: dose.time });
+    const sent = await notify(dose); // may return { subject, message } so the dashboard can preview the email
+    await store.recordAlert(dose.key, { sentAt: new Date(nowMs).toISOString(), doseTime: dose.time, ...(sent || {}) });
     alerted.push(dose.key);
   }
   return { doses, alerted };
 }
 
-module.exports = { zonedToUtcMs, dayBounds, validateSettings, evaluateDoses, checkDoses };
+function prevDate(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+}
+
+// The last `days` local days (today included) with each dose's status, oldest first.
+// Past days are judged at the end of that day with the current settings.
+function evaluateWeek(settings, events, nowMs, days = 7) {
+  const tz = settings.timezone;
+  const dates = [];
+  for (let date = localDate(nowMs, tz); dates.length < days; date = prevDate(date)) dates.unshift(date);
+  const today = dates[dates.length - 1];
+  return dates.map((date) => {
+    const at = date === today ? nowMs : zonedToUtcMs(nextDate(date), '00:00', tz) - 1;
+    return { date, doses: evaluateDoses(settings, events, at) };
+  });
+}
+
+// ISO start of the oldest day shown by evaluateWeek.
+function weekStartIso(nowMs, tz, days = 7) {
+  let date = localDate(nowMs, tz);
+  for (let i = 1; i < days; i++) date = prevDate(date);
+  return new Date(zonedToUtcMs(date, '00:00', tz)).toISOString();
+}
+
+module.exports = { zonedToUtcMs, dayBounds, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses };

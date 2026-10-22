@@ -6,8 +6,9 @@ const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 const { listDevices, verifySignature, parseWebhook } = require('./ring');
 const { createMemoryStore } = require('./store');
 const { createDynamoStore } = require('./store-dynamodb');
-const { validateSettings, evaluateDoses, checkDoses, dayBounds } = require('./doses');
-const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback } = require('./wording');
+const { validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses, dayBounds } = require('./doses');
+const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback,
+  NAV, PRIVACY_LINES, UI, dosesSummary, alertsSummary, lastActivitySummary, houseStatus } = require('./wording');
 
 const app = express();
 // Keep the raw bytes: Ring's webhook signature is computed over them.
@@ -156,6 +157,7 @@ async function notifyPossiblyMissed(dose) {
     message = missedFallback(dose.time, start, end);
   }
   await sendAlertEmail(message, MISSED_SUBJECT);
+  return { subject: MISSED_SUBJECT, message };
 }
 
 // The scheduler may use CRON_TOKEN (X-Cron-Token header) instead of the dashboard password,
@@ -175,22 +177,76 @@ app.post('/internal/check-doses', requireCronOrPassword, async (req, res) => {
   }
 });
 
-// Everything the dashboard shows, in one call: today's doses, events, alerts and approved wording.
+// Local time of day, HH:MM, for dashboard summaries.
+const clock = (iso, tz) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+
+// Hours since the latest motion event at any camera (last 7 days), or null if none is on record.
+async function hoursSinceLastMotion(now) {
+  const events = await store.listEvents(new Date(now - 7 * 24 * 3600 * 1000).toISOString(), new Date(now + 1000).toISOString());
+  const motion = events.filter((e) => e.type === 'motion_detected');
+  if (!motion.length) return null;
+  return Math.max(0, (now - Date.parse(motion[motion.length - 1].time)) / 3600000);
+}
+
+// Everything the Today page shows, in one call: doses, events, alerts, summary cards and wording.
 app.get('/api/today', requirePassword, async (req, res) => {
   const settings = await store.getSettings();
   const now = Date.now();
   const { date, from, to } = dayBounds(now, settings.timezone);
   const events = await store.listEvents(from, to);
+  const doses = evaluateDoses(settings, events, now);
+  const alerts = await store.listAlerts(from, to);
+  const lastNear = [...events].reverse().find((e) => e.type === 'motion_detected' && e.deviceId === settings.cameraId);
   res.json({
     date,
     timezone: settings.timezone,
     cameraId: settings.cameraId,
-    doses: evaluateDoses(settings, events, now),
+    doses,
     events,
-    alerts: await store.listAlerts(from, to),
+    alerts,
+    summary: {
+      doses: dosesSummary(doses.length, doses.filter((d) => d.status === 'likely_taken').length, doses.filter((d) => d.status === 'not_confirmed').length),
+      alerts: alertsSummary(alerts.length),
+      last: lastActivitySummary(lastNear ? clock(lastNear.time, settings.timezone) : null, true),
+      house: houseStatus(await hoursSinceLastMotion(now), NO_MOTION_ALERT_HOURS)
+    },
     statusLabels: STATUS_LABELS,
     footer: FOOTER_LINES
   });
+});
+
+// The last 7 days, one status per dose per day.
+app.get('/api/week', requirePassword, async (req, res) => {
+  const settings = await store.getSettings();
+  const now = Date.now();
+  const events = await store.listEvents(weekStartIso(now, settings.timezone), new Date(now + 1000).toISOString());
+  res.json({ timezone: settings.timezone, days: evaluateWeek(settings, events, now), footer: FOOTER_LINES });
+});
+
+// Alerts sent in the last 30 days (the retention period), newest first, with the email text.
+app.get('/api/alerts', requirePassword, async (req, res) => {
+  const now = Date.now();
+  const settings = await store.getSettings();
+  const alerts = await store.listAlerts(new Date(now - 30 * 24 * 3600 * 1000).toISOString(), new Date(now + 1000).toISOString());
+  res.json({ timezone: settings.timezone, alerts: alerts.reverse(), footer: FOOTER_LINES });
+});
+
+// Approved wording used by every dashboard page.
+app.get('/api/wording', requirePassword, (req, res) => {
+  res.json({ nav: NAV, privacy: PRIVACY_LINES, ui: UI, footer: FOOTER_LINES, statusLabels: STATUS_LABELS });
+});
+
+// Demo only: adds a motion event marked as a simulation at the chosen camera.
+app.post('/api/simulate-motion', requirePassword, async (req, res) => {
+  const { cameraId } = await store.getSettings();
+  if (!cameraId) return res.status(400).json({ error: 'Choose a camera in Settings first' });
+  const now = new Date();
+  await store.addEvent({ id: `sim-${now.getTime()}`, time: now.toISOString(), type: 'motion_detected', deviceId: cameraId, simulated: true });
+  res.json({ added: true });
+});
+
+app.delete('/api/simulated-events', requirePassword, async (req, res) => {
+  res.json({ removed: await store.deleteSimulatedEvents() });
 });
 
 app.get('/', requirePassword, (req, res) => {

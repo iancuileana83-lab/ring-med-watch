@@ -7,7 +7,7 @@
 //   SETTINGS / CURRENT                          caregiver settings
 
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } = require('@aws-sdk/lib-dynamodb');
+const { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 
 const TTL_SECONDS = 30 * 24 * 3600;
 const DEFAULT_SETTINGS = {
@@ -47,6 +47,7 @@ function createDynamoStore({ tableName, region, client, defaultTimezone = 'UTC' 
             pk: `EVENTS#${event.time.slice(0, 10)}`,
             sk: `${event.time}#${event.id}`,
             id: event.id, time: event.time, type: event.type, deviceId: event.deviceId,
+            ...(event.simulated ? { simulated: true } : {}),
             ttl: ttlFrom(event.time)
           },
           ConditionExpression: 'attribute_not_exists(pk)'
@@ -69,8 +70,26 @@ function createDynamoStore({ tableName, region, client, defaultTimezone = 'UTC' 
       }
       return events
         .filter((e) => e.time >= fromIso && e.time < toIso)
-        .map(({ id, time, type, deviceId }) => ({ id, time, type, deviceId }))
+        .map(({ id, time, type, deviceId, simulated }) => ({ id, time, type, deviceId, ...(simulated ? { simulated: true } : {}) }))
         .sort((a, b) => a.time.localeCompare(b.time));
+    },
+
+    // Removes only demo events (last 30 days, the TTL window); returns how many were removed.
+    async deleteSimulatedEvents() {
+      let removed = 0;
+      const today = Date.parse(new Date().toISOString().slice(0, 10));
+      for (let d = today - 30 * 86400000; d <= today + 86400000; d += 86400000) {
+        const items = await queryAll({
+          KeyConditionExpression: 'pk = :pk',
+          FilterExpression: 'simulated = :t',
+          ExpressionAttributeValues: { ':pk': `EVENTS#${new Date(d).toISOString().slice(0, 10)}`, ':t': true }
+        });
+        for (const item of items) {
+          await db.send(new DeleteCommand({ TableName: tableName, Key: { pk: item.pk, sk: item.sk } }));
+          removed++;
+        }
+      }
+      return removed;
     },
 
     async recordAlert(key, alert) {
@@ -94,7 +113,7 @@ function createDynamoStore({ tableName, region, client, defaultTimezone = 'UTC' 
         ExpressionAttributeValues: { ':pk': 'ALERT', ':a': fromIso, ':b': toIso }
       });
       return items
-        .map(({ sk, sentAt, doseTime }) => ({ key: sk, sentAt, doseTime }))
+        .map(({ sk, sentAt, doseTime, subject, message }) => ({ key: sk, sentAt, doseTime, ...(subject ? { subject } : {}), ...(message ? { message } : {}) }))
         .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
     },
 

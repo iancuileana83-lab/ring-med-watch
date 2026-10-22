@@ -2,81 +2,245 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Ring Med Watch</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%231f7a6d'/%3E%3Cpath d='M8 15l8-7 8 7v8a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1z' fill='none' stroke='%23fff' stroke-width='2' stroke-linejoin='round'/%3E%3Ccircle cx='16' cy='18' r='2.4' fill='%23fff'/%3E%3C/svg%3E">
 <style>
-  :root { --bg:#f6f7f9; --card:#fff; --text:#1c2430; --muted:#5b6675; --line:#dfe3e8; --accent:#2457c5; --ok:#1f7a4d; --warn:#9a5b00; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#12161c; --card:#1b212a; --text:#e6e9ee; --muted:#9aa5b4; --line:#2c3541; --accent:#7aa2f7; --ok:#5fcf9a; --warn:#f0b35a; }
+  :root {
+    --bg:#fbf6ef; --card:#fffdf9; --text:#2b2622; --muted:#6d6359; --line:#eadfce;
+    --accent:#1f7a6d; --accent-soft:#dff1ed; --on-accent:#fff;
+    --ok:#1d6b45; --ok-bg:#dcefe1; --warn:#8a5a00; --warn-bg:#fbeccb; --quiet:#a2431f; --quiet-bg:#f9dfd3;
+    --neutral:#5d554b; --neutral-bg:#efe7da; --sim:#6a4c93; --sim-bg:#ece3f6;
+    --shadow:0 1px 2px rgba(60,40,20,.06), 0 4px 14px rgba(60,40,20,.05);
   }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui, sans-serif; }
-  main { max-width:760px; margin:0 auto; padding:16px; }
-  h1 { font-size:1.4rem; margin:8px 0 2px; }
-  h2 { font-size:1.05rem; margin:0 0 10px; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#171411; --card:#211d19; --text:#f1e9de; --muted:#b0a597; --line:#342d26;
+      --accent:#5fc2b1; --accent-soft:#1d3a35; --on-accent:#0f2a25;
+      --ok:#8fd9ae; --ok-bg:#1d3326; --warn:#f0c46a; --warn-bg:#3a2e12; --quiet:#f2a184; --quiet-bg:#3d2218;
+      --neutral:#c4b9aa; --neutral-bg:#2d2720; --sim:#c9b0ee; --sim-bg:#2c2340;
+      --shadow:none;
+    }
+  }
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width:880px; margin:0 auto; padding:0 16px; }
+
+  header { background:var(--card); border-bottom:1px solid var(--line); }
+  header .wrap { display:flex; align-items:center; gap:16px; min-height:64px; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.1rem; letter-spacing:.2px; }
+  .brand svg { width:34px; height:34px; flex:none; }
+  nav { margin-left:auto; display:flex; gap:4px; }
+  nav a { display:flex; align-items:center; gap:7px; padding:8px 12px; border-radius:10px; color:var(--muted); text-decoration:none; font-weight:600; font-size:.95rem; }
+  nav a svg { width:20px; height:20px; flex:none; }
+  nav a:hover { background:var(--neutral-bg); }
+  nav a[aria-current="page"] { background:var(--accent-soft); color:var(--accent); }
+  nav a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+
+  main { padding:20px 0 28px; }
+  h1 { font-size:1.35rem; margin:0 0 4px; }
+  h2 { font-size:1.05rem; margin:0 0 12px; }
   .sub { color:var(--muted); margin:0 0 16px; }
-  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
-  ul { list-style:none; margin:0; padding:0; }
-  li { display:flex; gap:12px; padding:8px 0; border-top:1px solid var(--line); }
-  li:first-child { border-top:0; }
-  .t { min-width:52px; font-variant-numeric:tabular-nums; color:var(--muted); }
-  .likely_taken .what { color:var(--ok); }
-  .not_confirmed .what, .alert .what { color:var(--warn); }
+  .page[hidden] { display:none; }
+
+  .cards { display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; margin-bottom:16px; }
+  @media (min-width:760px) { .cards { grid-template-columns:repeat(4, 1fr); } }
+  .card, section.panel { background:var(--card); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); }
+  .card { padding:14px; }
+  .card .head { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:.85rem; font-weight:600; margin-bottom:6px; }
+  .card .head svg { width:18px; height:18px; color:var(--accent); flex:none; }
+  .card .value { font-size:.98rem; font-weight:600; line-height:1.35; }
+  .card.quiet { border-color:var(--quiet); background:var(--quiet-bg); }
+  .card.quiet .head svg { color:var(--quiet); }
+  section.panel { padding:16px; margin-bottom:16px; }
+
+  ul.list { list-style:none; margin:0; padding:0; }
+  ul.list > li { display:flex; align-items:center; gap:12px; padding:10px 0; border-top:1px solid var(--line); flex-wrap:wrap; }
+  ul.list > li:first-child { border-top:0; }
+  .t { min-width:48px; font-variant-numeric:tabular-nums; color:var(--muted); font-weight:600; }
+  .grow { flex:1 1 180px; min-width:0; }
+  .name { font-weight:700; }
   .empty { color:var(--muted); }
-  label { display:block; margin:10px 0 4px; font-weight:600; }
-  input, select, button { font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--text); }
-  button { background:var(--accent); border-color:var(--accent); color:#fff; cursor:pointer; }
-  button.plain { background:transparent; color:var(--accent); }
-  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:6px; }
-  .msg { margin-top:10px; min-height:1.4em; color:var(--muted); }
-  footer { color:var(--muted); font-size:.9rem; padding-bottom:24px; }
+
+  .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; font-size:.85rem; font-weight:600; background:var(--neutral-bg); color:var(--neutral); }
+  .pill svg { width:15px; height:15px; flex:none; }
+  .pill.likely_taken { background:var(--ok-bg); color:var(--ok); }
+  .pill.not_confirmed { background:var(--warn-bg); color:var(--warn); }
+  .pill.sim { background:var(--sim-bg); color:var(--sim); }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--neutral); flex:none; }
+  .dot.alert { background:var(--warn); } .dot.motion { background:var(--accent); } .dot.sim { background:var(--sim); }
+
+  .demo { border:1px dashed var(--sim); background:var(--sim-bg); border-radius:16px; padding:14px 16px; margin-bottom:16px; }
+  .demo p { margin:0 0 10px; color:var(--sim); font-weight:600; }
+  .demo .btns { display:flex; gap:8px; flex-wrap:wrap; }
+
+  label { display:block; margin:12px 0 4px; font-weight:600; }
+  input, select, button { font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--text); min-height:44px; }
+  input[type=text], input[type=number], select { width:100%; }
+  button { background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:700; cursor:pointer; }
+  button.plain { background:transparent; color:var(--accent); border-color:var(--line); }
+  button.sim { background:var(--sim); border-color:var(--sim); color:#fff; }
+  button:disabled { opacity:.6; cursor:default; }
+  .dose-row { display:grid; grid-template-columns:120px 1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
+  @media (max-width:520px) { .dose-row { grid-template-columns:1fr auto; } .dose-row input[type=text] { grid-column:1 / 2; } }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .hint, .msg { color:var(--muted); font-size:.9rem; margin:6px 0 0; }
+  .msg { min-height:1.4em; }
+
+  .weekgrid { width:100%; border-collapse:separate; border-spacing:4px; table-layout:fixed; }
+  .weekgrid th { font-size:.8rem; color:var(--muted); font-weight:600; padding:2px 0; text-align:center; }
+  .weekgrid th.rowhead { text-align:left; width:30%; color:var(--text); font-size:.9rem; padding-right:6px; }
+  .weekgrid th.rowhead small { display:block; color:var(--muted); font-weight:500; }
+  .cell { display:flex; align-items:center; justify-content:center; gap:6px; min-height:46px; border-radius:10px; background:var(--neutral-bg); color:var(--neutral); font-size:.78rem; font-weight:600; text-align:center; line-height:1.15; padding:4px; }
+  .cell svg { width:18px; height:18px; flex:none; }
+  .cell .txt { display:none; }
+  @media (min-width:760px) { .cell .txt { display:inline; } .cell svg { width:16px; height:16px; } }
+  .cell.likely_taken { background:var(--ok-bg); color:var(--ok); }
+  .cell.not_confirmed { background:var(--warn-bg); color:var(--warn); }
+  .legend { display:flex; flex-wrap:wrap; gap:8px 14px; margin:14px 0 6px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; font-size:.88rem; }
+  .legend i { width:14px; height:14px; border-radius:4px; background:var(--neutral-bg); border:1px solid var(--line); display:inline-block; }
+  .legend i.likely_taken { background:var(--ok-bg); border-color:var(--ok); }
+  .legend i.not_confirmed { background:var(--warn-bg); border-color:var(--warn); }
+  .notes p { margin:4px 0; color:var(--muted); font-size:.9rem; }
+
+  details { border-top:1px solid var(--line); margin-top:8px; padding-top:8px; }
+  summary { cursor:pointer; font-weight:600; color:var(--accent); min-height:32px; display:flex; align-items:center; }
+  .email { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px; margin-top:8px; white-space:pre-wrap; font-size:.95rem; }
+  .email .subj { font-weight:700; margin-bottom:6px; }
+  .email .foot { color:var(--muted); font-size:.85rem; margin-top:10px; border-top:1px solid var(--line); padding-top:8px; }
+  .privacy-list li { display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--line); }
+  .privacy-list li:first-child { border-top:0; }
+  .privacy-list svg { width:22px; height:22px; color:var(--accent); flex:none; margin-top:2px; }
+
+  footer { color:var(--muted); font-size:.88rem; padding:8px 0 28px; }
   footer p { margin:6px 0; }
+
+  /* Phones: navigation becomes a bottom tab bar */
+  @media (max-width:759px) {
+    header .wrap { min-height:56px; }
+    nav { position:fixed; left:0; right:0; bottom:0; margin:0; background:var(--card); border-top:1px solid var(--line); padding:6px 6px calc(6px + env(safe-area-inset-bottom)); justify-content:space-around; gap:0; z-index:5; }
+    nav a { flex-direction:column; gap:2px; padding:6px 4px; font-size:.72rem; flex:1; justify-content:center; border-radius:12px; }
+    nav a svg { width:24px; height:24px; }
+    main { padding-bottom:92px; }
+  }
 </style>
 </head>
 <body>
-<main>
-  <h1>Ring Med Watch</h1>
-  <p class="sub" id="sub">Loading...</p>
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--accent)"/><path d="M8 15l8-7 8 7v8a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1z" fill="none" stroke="var(--on-accent)" stroke-width="2" stroke-linejoin="round"/><circle cx="16" cy="18" r="2.4" fill="var(--on-accent)"/></svg>
+      <span>Ring Med Watch</span>
+    </div>
+    <nav id="nav" aria-label="Main"></nav>
+  </div>
+</header>
 
-  <section>
-    <h2>Today's doses</h2>
-    <ul id="doses"></ul>
-  </section>
+<main class="wrap">
+  <div id="p-today" class="page" hidden>
+    <h1>Today</h1>
+    <p class="sub" id="todaySub">Loading...</p>
+    <div class="cards" id="cards"></div>
 
-  <section>
-    <h2>Today's timeline</h2>
-    <ul id="timeline"></ul>
-  </section>
-
-  <section>
-    <h2>Settings</h2>
-    <form id="form">
-      <label>Dose times</label>
-      <div id="doseInputs"></div>
-      <button type="button" class="plain" id="addDose">+ Add a time</button>
-
-      <label for="camera">Camera near the pills</label>
-      <select id="camera"></select>
-
-      <div class="row">
-        <div><label for="before">Minutes before the dose time</label><input id="before" type="number" min="0" max="180"></div>
-        <div><label for="after">Minutes after the dose time</label><input id="after" type="number" min="0" max="180"></div>
+    <div class="demo" id="demo">
+      <p id="demoBanner"></p>
+      <div class="btns">
+        <button type="button" class="sim" id="simBtn"></button>
+        <button type="button" class="plain" id="simClear"></button>
       </div>
+      <div class="msg" id="simMsg" role="status"></div>
+    </div>
 
-      <label for="tz">Timezone</label>
-      <input id="tz" type="text" placeholder="Europe/Bucharest">
+    <section class="panel"><h2>Doses</h2><ul class="list" id="doses"></ul></section>
+    <section class="panel"><h2>Timeline</h2><ul class="list" id="timeline"></ul></section>
+  </div>
 
-      <p><button type="submit">Save settings</button></p>
-      <div class="msg" id="msg" role="status"></div>
-    </form>
-  </section>
+  <div id="p-week" class="page" hidden>
+    <h1>Week</h1>
+    <p class="sub" id="weekSub"></p>
+    <section class="panel">
+      <div id="weekTable"></div>
+      <div class="legend" id="legend"></div>
+      <div class="notes" id="weekNotes"></div>
+    </section>
+  </div>
+
+  <div id="p-alerts" class="page" hidden>
+    <h1>Alerts</h1>
+    <p class="sub" id="alertsNote"></p>
+    <div id="alertList"></div>
+  </div>
+
+  <div id="p-settings" class="page" hidden>
+    <h1>Settings</h1>
+    <section class="panel">
+      <form id="form">
+        <label>Dose times</label>
+        <div id="doseInputs"></div>
+        <button type="button" class="plain" id="addDose">+ Add a time</button>
+        <p class="hint" id="labelHint"></p>
+
+        <label for="camera">Camera near the pills</label>
+        <select id="camera"></select>
+
+        <div class="grid2">
+          <div><label for="before">Minutes before the dose time</label><input id="before" type="number" min="0" max="180"></div>
+          <div><label for="after">Minutes after the dose time</label><input id="after" type="number" min="0" max="180"></div>
+        </div>
+
+        <label for="tz">Timezone</label>
+        <input id="tz" type="text" placeholder="Europe/Bucharest">
+
+        <p><button type="submit">Save settings</button></p>
+        <div class="msg" id="msg" role="status"></div>
+      </form>
+    </section>
+  </div>
+
+  <div id="p-privacy" class="page" hidden>
+    <h1>Privacy</h1>
+    <section class="panel"><ul class="list privacy-list" id="privacyList"></ul></section>
+  </div>
 
   <footer id="footer"></footer>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
-let current = null;
+const ICONS = {
+  today: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  week: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  alerts: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/>',
+  settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  privacy: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  doses: '<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
+  last: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  house: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+  check: '<path d="M5 12l5 5 9-10"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  dash: '<path d="M6 12h12"/>'
+};
+function icon(name) {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor');
+  s.setAttribute('stroke-width', '2'); s.setAttribute('stroke-linecap', 'round'); s.setAttribute('stroke-linejoin', 'round');
+  s.setAttribute('aria-hidden', 'true');
+  s.innerHTML = ICONS[name]; // static markup defined above, never user data
+  return s;
+}
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+let wording = null;
+let todayTimer = null;
+const PAGES = ['today', 'week', 'alerts', 'settings', 'privacy'];
 
 async function api(path, options) {
   const res = await fetch(path, options);
@@ -85,66 +249,180 @@ async function api(path, options) {
   return body;
 }
 
-function timeOf(iso, tz) {
-  return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+const timeOf = (iso, tz) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+const dayOf = (iso, tz) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(iso));
+
+function doseName(d) { return d.label ? `${d.label}` : `Dose ${d.time}`; }
+
+function statusIcon(status) {
+  return status === 'likely_taken' ? 'check' : status === 'not_confirmed' ? 'alert' : status === 'in_window' || status === 'upcoming' ? 'clock' : 'dash';
 }
 
-function item(time, text, cls) {
-  const li = document.createElement('li');
-  if (cls) li.className = cls;
-  const t = document.createElement('span'); t.className = 't'; t.textContent = time;
-  const w = document.createElement('span'); w.className = 'what'; w.textContent = text;
-  li.append(t, w);
-  return li;
+function statusPill(status) {
+  const p = el('span', `pill ${status}`);
+  p.append(icon(statusIcon(status)), document.createTextNode(wording.statusLabels[status]));
+  return p;
 }
 
-function empty(list, text) {
-  const li = document.createElement('li'); li.className = 'empty'; li.textContent = text; list.replaceChildren(li);
+function setFooter(lines) {
+  $('footer').replaceChildren(...lines.map((line) => el('p', '', line)));
 }
 
-function render(d) {
-  current = d;
-  $('sub').textContent = `${d.date} (${d.timezone})`;
+/* ---------- Today ---------- */
+function renderToday(d) {
+  $('todaySub').textContent = `${d.date} (${d.timezone})`;
+
+  const defs = [
+    ['doses', wording.ui.cards.doses, d.summary.doses, ''],
+    ['alerts', wording.ui.cards.alerts, d.summary.alerts, ''],
+    ['last', wording.ui.cards.last, d.summary.last, ''],
+    ['house', wording.ui.cards.house, d.summary.house.text, d.summary.house.level === 'quiet' ? 'quiet' : '']
+  ];
+  $('cards').replaceChildren(...defs.map(([ic, title, value, cls]) => {
+    const c = el('div', `card ${cls}`);
+    const head = el('div', 'head'); head.append(icon(ic === 'alerts' ? 'alerts' : ic), document.createTextNode(title));
+    c.append(head, el('div', 'value', value));
+    return c;
+  }));
 
   const doses = $('doses');
-  if (!d.doses.length) empty(doses, 'No dose times set yet. Add them in Settings below.');
-  else doses.replaceChildren(...d.doses.map((x) => item(x.time, d.statusLabels[x.status], x.status)));
+  if (!d.doses.length) doses.replaceChildren(el('li', 'empty', 'No dose times set yet. Add them in Settings.'));
+  else doses.replaceChildren(...d.doses.map((x) => {
+    const li = el('li');
+    li.append(el('span', 't', x.time));
+    const g = el('span', 'grow'); g.append(el('div', 'name', doseName(x)));
+    li.append(g, statusPill(x.status));
+    return li;
+  }));
 
   const rows = [];
-  for (const x of d.doses) rows.push({ at: x.windowStart, el: item(timeOf(x.windowStart, d.timezone), `Dose window ${x.time} opens`) });
+  for (const x of d.doses) rows.push({ at: x.windowStart, li: row(timeOf(x.windowStart, d.timezone), `${doseName(x)} - window opens`, 'dot') });
   for (const e of d.events) {
     const near = e.deviceId === d.cameraId;
     const kind = e.type === 'motion_detected' ? 'Motion' : e.type;
-    rows.push({ at: e.time, el: item(timeOf(e.time, d.timezone), `${kind} - ${near ? 'camera near the pills' : 'other camera'}`) });
+    const li = row(timeOf(e.time, d.timezone), `${kind} - ${near ? 'camera near the pills' : 'other camera'}`, e.simulated ? 'dot sim' : 'dot motion');
+    if (e.simulated) li.append(el('span', 'pill sim', wording.ui.simulate.badge));
+    rows.push({ at: e.time, li });
   }
-  for (const a of d.alerts) rows.push({ at: a.sentAt, el: item(timeOf(a.sentAt, d.timezone), `Alert email sent for the ${a.doseTime} dose`, 'alert') });
+  for (const a of d.alerts) rows.push({ at: a.sentAt, li: row(timeOf(a.sentAt, d.timezone), `Alert email sent for the ${a.doseTime} dose`, 'dot alert') });
   rows.sort((a, b) => a.at.localeCompare(b.at));
-  if (!rows.length) empty($('timeline'), 'Nothing recorded yet today.');
-  else $('timeline').replaceChildren(...rows.map((r) => r.el));
-
-  $('footer').replaceChildren(...d.footer.map((line) => { const p = document.createElement('p'); p.textContent = line; return p; }));
+  $('timeline').replaceChildren(...(rows.length ? rows.map((r) => r.li) : [el('li', 'empty', 'Nothing recorded yet today.')]));
+  setFooter(d.footer);
 }
 
-function addDoseInput(value = '') {
-  const row = document.createElement('div'); row.className = 'row';
-  const input = document.createElement('input'); input.type = 'time'; input.value = value; input.required = true; input.setAttribute('aria-label', 'Dose time');
-  const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'plain'; rm.textContent = 'Remove';
-  rm.onclick = () => row.remove();
-  row.append(input, rm);
-  $('doseInputs').append(row);
+function row(time, text, dotClass) {
+  const li = el('li');
+  li.append(el('span', 't', time), el('span', dotClass), el('span', 'grow', text));
+  return li;
+}
+
+async function loadToday() {
+  try { renderToday(await api('/api/today')); } catch (err) { $('todaySub').textContent = err.message; }
+}
+
+async function simulate(path, method, msgText) {
+  $('simMsg').textContent = '...';
+  try {
+    const r = await api(path, { method });
+    $('simMsg').textContent = msgText(r);
+    await loadToday();
+  } catch (err) { $('simMsg').textContent = err.message; }
+}
+
+/* ---------- Week ---------- */
+function cellStatus(s) { return s === 'in_window' ? 'upcoming' : s === 'no_camera' ? 'not_set' : s; }
+
+async function loadWeek() {
+  const w = await api('/api/week');
+  $('weekSub').textContent = `Last 7 days (${w.timezone})`;
+  const days = w.days;
+  const names = days[days.length - 1].doses.length ? days[days.length - 1].doses : [];
+  const table = el('table', 'weekgrid');
+  table.setAttribute('role', 'table');
+  const head = el('tr'); head.append(el('th', 'rowhead', ''));
+  for (const day of days) {
+    const th = el('th'); th.scope = 'col';
+    const dt = new Date(`${day.date}T12:00:00Z`);
+    th.textContent = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric' }).format(dt);
+    head.append(th);
+  }
+  table.append(head);
+  if (!names.length) {
+    $('weekTable').replaceChildren(el('p', 'empty', 'No dose times set yet. Add them in Settings.'));
+  } else {
+    names.forEach((dose, i) => {
+      const tr = el('tr');
+      const th = el('th', 'rowhead'); th.scope = 'row';
+      th.append(document.createTextNode(doseName(dose)), el('small', '', dose.time));
+      tr.append(th);
+      for (const day of days) {
+        const status = cellStatus(day.doses[i].status);
+        const td = el('td');
+        const c = el('div', `cell ${status}`);
+        const text = wording.ui.weekLegend[status];
+        c.append(icon(statusIcon(status === 'not_set' ? 'no_camera' : status)), el('span', 'txt', text));
+        c.title = `${dayOf(`${day.date}T12:00:00Z`, 'UTC')}: ${text}`;
+        c.setAttribute('role', 'img'); c.setAttribute('aria-label', c.title);
+        td.append(c); tr.append(td);
+      }
+      table.append(tr);
+    });
+    $('weekTable').replaceChildren(table);
+  }
+  $('legend').replaceChildren(...['likely_taken', 'not_confirmed', 'upcoming', 'not_set'].map((k) => {
+    const s = el('span'); s.append(el('i', k), document.createTextNode(wording.ui.weekLegend[k])); return s;
+  }));
+  $('weekNotes').replaceChildren(...wording.ui.weekNotes.map((n) => el('p', '', n)));
+  setFooter(w.footer);
+}
+
+/* ---------- Alerts ---------- */
+async function loadAlerts() {
+  const r = await api('/api/alerts');
+  $('alertsNote').textContent = wording.ui.alertsNote;
+  const box = $('alertList');
+  if (!r.alerts.length) { box.replaceChildren(el('section', 'panel empty', wording.ui.alertsEmpty)); setFooter(r.footer); return; }
+  box.replaceChildren(...r.alerts.map((a) => {
+    const s = el('section', 'panel');
+    const top = el('div'); top.style.display = 'flex'; top.style.gap = '10px'; top.style.alignItems = 'center'; top.style.flexWrap = 'wrap';
+    top.append(icon('alerts'), el('span', 'name', `${dayOf(a.sentAt, r.timezone)}, ${timeOf(a.sentAt, r.timezone)}`), el('span', 'pill not_confirmed', `${a.doseTime} dose - possibly missed`));
+    top.firstChild.style.cssText = 'width:22px;height:22px;color:var(--warn)';
+    s.append(top);
+    if (a.message) {
+      const det = el('details');
+      det.append(el('summary', '', wording.ui.emailPreview));
+      const mail = el('div', 'email');
+      mail.append(el('div', 'subj', a.subject || ''), document.createTextNode(a.message), el('div', 'foot', r.footer.join('\n')));
+      det.append(mail);
+      s.append(det);
+    }
+    return s;
+  }));
+  setFooter(r.footer);
+}
+
+/* ---------- Settings ---------- */
+function addDoseInput(time = '', label = '') {
+  const r = el('div', 'dose-row');
+  const t = el('input'); t.type = 'time'; t.value = time; t.required = true; t.setAttribute('aria-label', 'Dose time');
+  const l = el('input'); l.type = 'text'; l.value = label; l.maxLength = 30; l.placeholder = 'Name (optional)'; l.setAttribute('aria-label', 'Dose name');
+  const rm = el('button', 'plain', 'Remove'); rm.type = 'button'; rm.onclick = () => r.remove();
+  r.append(t, l, rm);
+  $('doseInputs').append(r);
 }
 
 async function loadSettings() {
+  $('labelHint').textContent = wording.ui.labelHint;
   const s = await api('/api/settings');
   $('doseInputs').replaceChildren();
-  s.doses.forEach((x) => addDoseInput(x.time));
+  s.doses.forEach((x) => addDoseInput(x.time, x.label || ''));
   $('before').value = s.windowBeforeMinutes;
   $('after').value = s.windowAfterMinutes;
   $('tz').value = s.timezone;
 
   const sel = $('camera');
   sel.replaceChildren(new Option('No camera chosen', ''));
-  let ids = new Set();
+  const ids = new Set();
   try {
     (await api('/api/devices')).devices.forEach((dev) => { sel.append(new Option(dev.name, dev.id)); ids.add(dev.id); });
   } catch (err) {
@@ -152,10 +430,10 @@ async function loadSettings() {
   }
   if (s.cameraId && !ids.has(s.cameraId)) sel.append(new Option(s.cameraId, s.cameraId));
   sel.value = s.cameraId || '';
+  setFooter(wording.footer);
 }
 
 $('addDose').onclick = () => addDoseInput();
-
 $('form').onsubmit = async (ev) => {
   ev.preventDefault();
   $('msg').textContent = 'Saving...';
@@ -164,7 +442,10 @@ $('form').onsubmit = async (ev) => {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        doses: [...document.querySelectorAll('#doseInputs input')].map((i) => i.value),
+        doses: [...document.querySelectorAll('#doseInputs .dose-row')].map((r) => {
+          const [t, l] = r.querySelectorAll('input');
+          return { time: t.value, label: l.value };
+        }),
         cameraId: $('camera').value || null,
         windowBeforeMinutes: Number($('before').value),
         windowAfterMinutes: Number($('after').value),
@@ -172,19 +453,50 @@ $('form').onsubmit = async (ev) => {
       })
     });
     $('msg').textContent = 'Saved.';
-    await refresh();
   } catch (err) {
     $('msg').textContent = err.message;
   }
 };
 
-async function refresh() {
-  try { render(await api('/api/today')); } catch (err) { $('sub').textContent = err.message; }
+/* ---------- Privacy ---------- */
+function loadPrivacy() {
+  $('privacyList').replaceChildren(...wording.privacy.map((line) => { const li = el('li'); li.append(icon('privacy'), el('span', '', line)); return li; }));
+  setFooter(wording.footer);
 }
 
-refresh();
-loadSettings();
-setInterval(refresh, 60000);
+/* ---------- Router ---------- */
+function route() {
+  const page = PAGES.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'today';
+  for (const p of PAGES) $(`p-${p}`).hidden = p !== page;
+  document.querySelectorAll('#nav a').forEach((a) => (a.getAttribute('href') === `#${page}`) ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
+  clearInterval(todayTimer);
+  const fail = (err) => { setFooter([err.message]); };
+  if (page === 'today') { loadToday(); todayTimer = setInterval(loadToday, 15000); }
+  if (page === 'week') loadWeek().catch(fail);
+  if (page === 'alerts') loadAlerts().catch(fail);
+  if (page === 'settings') loadSettings().catch(fail);
+  if (page === 'privacy') loadPrivacy();
+  window.scrollTo(0, 0);
+}
+
+(async function start() {
+  try {
+    wording = await api('/api/wording');
+  } catch (err) { $('todaySub').textContent = err.message; return; }
+  $('nav').replaceChildren(...wording.nav.map((name) => {
+    const a = el('a'); a.href = `#${name.toLowerCase()}`;
+    a.append(icon(name.toLowerCase()), document.createTextNode(name));
+    return a;
+  }));
+  const sim = wording.ui.simulate;
+  $('demoBanner').textContent = sim.banner;
+  $('simBtn').textContent = sim.button;
+  $('simClear').textContent = sim.clear;
+  $('simBtn').onclick = () => simulate('/api/simulate-motion', 'POST', () => sim.badge + ': motion added.');
+  $('simClear').onclick = () => simulate('/api/simulated-events', 'DELETE', (r) => `${r.removed} simulated event(s) removed.`);
+  window.addEventListener('hashchange', route);
+  route();
+})();
 </script>
 </body>
 </html>
