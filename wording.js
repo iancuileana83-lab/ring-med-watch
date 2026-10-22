@@ -64,7 +64,6 @@ const UI = {
     fetch: 'Fetch Ring events',
     needToken: 'Connect a Ring Playground token first',
     needCamera: 'Choose a Ring camera in Settings first',
-    added: 'new events added.',
     none: 'No new events.',
     cameraHintExpired: 'The Ring Playground token expired. Paste a new one to refresh the camera list.',
     cameraHintRejected: 'Ring rejected the token. Paste a new one to refresh the camera list.',
@@ -78,6 +77,22 @@ const UI = {
   labelHint: 'Optional name for this dose, like Morning pills. Please do not enter medicine names.',
   demoCamera: 'Demo camera (simulation)'
 };
+
+// Timeline labels for Ring event types. Only 'motion_detected' counts for dose checks and house status.
+const EVENT_LABELS = { motion_detected: 'Motion', on_demand: 'Live view opened (Ring Playground)' };
+const OTHER_EVENT_PREFIX = 'Ring event';
+
+// Message after "Fetch Ring events". counts: { motion, liveView, other } = newly added events by kind.
+function fetchResultText({ motion = 0, liveView = 0, other = 0 }) {
+  const total = motion + liveView + other;
+  if (!total) return UI.token.none;
+  const noun = `new Ring ${total === 1 ? 'event' : 'events'} added`;
+  const notMotion = liveView + other;
+  if (!notMotion) return `${total} ${noun}.`;
+  const why = liveView && !other ? 'live view, not counted as motion' : 'not counted as motion';
+  if (!motion) return `${total} ${noun} (${why}).`;
+  return `${total} ${noun} (${motion} motion, ${notMotion} not counted as motion).`;
+}
 
 function seenDeviceName(id) {
   return `Ring Playground device (${String(id).slice(-6)})`;
@@ -162,5 +177,5 @@ function missedFallback(doseTime, windowStart, windowEnd) {
 module.exports = {
   STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback,
   CHECKIN, DEMO_ALERT_SUFFIX, DEMO_ALERT_NOTE, SUMMARY_SUBJECT, SIMULATED_NOTE, summaryFactsText, summaryPrompt, summaryFallback,
-  NAV, PRIVACY_LINES, UI, seenDeviceName, dosesSummary, alertsSummary, lastActivitySummary, houseStatus
+  NAV, PRIVACY_LINES, UI, EVENT_LABELS, OTHER_EVENT_PREFIX, fetchResultText, seenDeviceName, dosesSummary, alertsSummary, lastActivitySummary, houseStatus
 };

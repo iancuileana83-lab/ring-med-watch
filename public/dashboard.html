@@ -318,6 +318,11 @@ function renderToday(d) {
   const rows = [];
   for (const x of d.doses) rows.push({ at: x.windowStart, li: row(timeOf(x.windowStart, d.timezone), `${doseName(x)} - window opens`, 'dot') });
   for (const e of d.events) {
+    if (e.type !== 'motion_detected') { // other Ring events are shown but never counted as motion
+      const label = wording.eventLabels[e.type] || `${wording.otherEventPrefix} (${e.type})`;
+      rows.push({ at: e.time, li: row(timeOf(e.time, d.timezone), label, 'dot') });
+      continue;
+    }
     const near = e.deviceId === d.cameraId;
     const kind = e.type === 'motion_detected' ? 'Motion' : e.type;
     const li = row(timeOf(e.time, d.timezone), `${kind} - ${d.demoCamera && near ? 'demo camera (simulation)' : near ? 'camera near the pills' : 'other camera'}`, e.simulated ? 'dot sim' : 'dot motion');
@@ -367,7 +372,7 @@ async function fetchRingEvents() {
   $('fetchMsg').textContent = '...';
   try {
     const r = await api('/api/ring/fetch-events', { method: 'POST' });
-    $('fetchMsg').textContent = r.added ? `${r.added} ${t.added}` : t.none;
+    $('fetchMsg').textContent = r.message;
     await loadToday();
   } catch (err) {
     $('fetchMsg').textContent = err.message;

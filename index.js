@@ -11,7 +11,7 @@ const { runDailySummary } = require('./summary');
 const { DEMO_CAMERA_ID, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses, dayBounds } = require('./doses');
 const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback,
   CHECKIN, SUMMARY_SUBJECT, DEMO_ALERT_SUFFIX, DEMO_ALERT_NOTE,
-  NAV, PRIVACY_LINES, UI, seenDeviceName, dosesSummary, alertsSummary, lastActivitySummary, houseStatus } = require('./wording');
+  NAV, PRIVACY_LINES, UI, EVENT_LABELS, OTHER_EVENT_PREFIX, fetchResultText, seenDeviceName, dosesSummary, alertsSummary, lastActivitySummary, houseStatus } = require('./wording');
 
 const app = express();
 // Keep the raw bytes: Ring's webhook signature is computed over them.
@@ -169,9 +169,12 @@ app.post('/api/ring/fetch-events', requirePassword, async (req, res) => {
   if (!cameraId || cameraId === DEMO_CAMERA_ID) return res.status(400).json({ error: 'Choose a Ring camera in Settings first' });
   try {
     const events = await fetchHistoryEvents(cameraId);
-    let added = 0;
-    for (const e of events) if (await store.addEvent(e)) added++; // addEvent ignores ids it already has
-    res.json({ fetched: events.length, added });
+    const counts = { motion: 0, liveView: 0, other: 0 };
+    for (const e of events) {
+      if (!(await store.addEvent(e))) continue; // addEvent ignores ids it already has
+      counts[e.type === 'motion_detected' ? 'motion' : e.type === 'on_demand' ? 'liveView' : 'other']++;
+    }
+    res.json({ fetched: events.length, added: counts.motion + counts.liveView + counts.other, ...counts, message: fetchResultText(counts) });
   } catch (err) {
     console.warn('Ring event fetch failed:', err.message);
     res.status(err instanceof RingError && err.status === 401 ? 401 : 502).json({ error: err.message });
@@ -372,7 +375,7 @@ app.get('/api/alerts', requirePassword, async (req, res) => {
 
 // Approved wording used by every dashboard page.
 app.get('/api/wording', requirePassword, (req, res) => {
-  res.json({ nav: NAV, privacy: PRIVACY_LINES, ui: UI, demoCameraId: DEMO_CAMERA_ID, footer: FOOTER_LINES, statusLabels: STATUS_LABELS });
+  res.json({ nav: NAV, privacy: PRIVACY_LINES, ui: UI, eventLabels: EVENT_LABELS, otherEventPrefix: OTHER_EVENT_PREFIX, demoCameraId: DEMO_CAMERA_ID, footer: FOOTER_LINES, statusLabels: STATUS_LABELS });
 });
 
 // Demo only: adds a motion event marked as a simulation at the chosen camera.

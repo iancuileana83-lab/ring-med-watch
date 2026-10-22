@@ -107,14 +107,16 @@ test('fetch-events: needs a token and a Ring camera, then adds motion events onc
     await store.saveSettings({ cameraId: DEVICE });
 
     const first = await (await post()).json();
-    assert.deepStrictEqual(first, { fetched: 2, added: 2 }); // h1 and h3 (h2 is a doorbell press); two pages followed
+    // h1 and h3 are motion, h2 is another Ring event type; two pages followed
+    assert.deepStrictEqual(first, { fetched: 3, added: 3, motion: 2, liveView: 0, other: 1, message: '3 new Ring events added (2 motion, 1 not counted as motion).' });
     const second = await (await post()).json();
-    assert.deepStrictEqual(second, { fetched: 2, added: 0 });
+    assert.deepStrictEqual(second, { fetched: 3, added: 0, motion: 0, liveView: 0, other: 0, message: 'No new events.' });
 
     const today = await (await fetch(`${base}/api/today`, { headers: auth })).json();
     const ring = today.events.filter((e) => e.deviceId === DEVICE);
     assert.ok(ring.length >= 1);
-    assert.ok(ring.every((e) => e.simulated === undefined && e.type === 'motion_detected'));
+    assert.ok(ring.every((e) => e.simulated === undefined)); // real Ring events, not simulation
+    assert.deepStrictEqual(ring.map((e) => e.type).sort(), ['doorbell.press', 'motion_detected', 'motion_detected']);
     assert.strictEqual(UI.ringEventBadge, 'Ring Playground event');
   });
   assert.ok(ringCalls.some((c) => c.url === `https://api.amazonvision.com/v1/history/devices/${encodeURIComponent(DEVICE)}/events`));
@@ -182,4 +184,39 @@ test('camera list tells apart a rejected token and a failed request', async () =
     ringHandler = () => ({ status: 406, body: {} });
     assert.strictEqual((await (await fetch(`${base}/api/devices`, { headers: auth })).json()).ringApi, 'error');
   });
+});
+
+test('Playground on_demand (live view) events are shown with their own label but never count as motion', async () => {
+  const startOfHour = new Date(); startOfHour.setUTCMinutes(0, 0, 0);
+  const doseTime = `${String(startOfHour.getUTCHours()).padStart(2, '0')}:00`;
+  const t = new Date(Date.now() - 60000).toISOString();
+  const LIVE_VIEW_DEVICE = 'ava1.ring.device.LIVEVIEWONLY'; // a camera with no motion events at all
+  await store.saveSettings({ doses: [{ time: doseTime, label: '' }], cameraId: LIVE_VIEW_DEVICE, windowBeforeMinutes: 60, windowAfterMinutes: 60, timezone: 'UTC' });
+  setPlaygroundToken(SECRET);
+  ringHandler = () => ({ status: 200, body: { data: [historyEvent('ondemand-1', 'on_demand', t)] } });
+  await withServer(async (base) => {
+    const r = await (await fetch(`${base}/api/ring/fetch-events`, { method: 'POST', headers: auth })).json();
+    assert.deepStrictEqual(r, { fetched: 1, added: 1, motion: 0, liveView: 1, other: 0, message: '1 new Ring event added (live view, not counted as motion).' });
+
+    const today = await (await fetch(`${base}/api/today`, { headers: auth })).json();
+    assert.ok(today.events.some((e) => e.id === 'ondemand-1' && e.type === 'on_demand'), 'shown in the timeline data');
+    assert.notStrictEqual(today.doses[0].status, 'likely_taken', 'a live view is not activity near the pills');
+    assert.ok(!today.summary.last.startsWith(new Date(t).toISOString().slice(11, 16) + ' at'), 'not the last activity');
+    const week = await (await fetch(`${base}/api/week`, { headers: auth })).json();
+    assert.notStrictEqual(week.days[6].doses[0].status, 'likely_taken');
+
+    const wording = await (await fetch(`${base}/api/wording`, { headers: auth })).json();
+    assert.strictEqual(wording.eventLabels.on_demand, 'Live view opened (Ring Playground)');
+    assert.strictEqual(wording.otherEventPrefix, 'Ring event');
+  });
+});
+
+test('fetch messages for each mix of event kinds', () => {
+  const { fetchResultText } = require('../wording');
+  assert.strictEqual(fetchResultText({}), 'No new events.');
+  assert.strictEqual(fetchResultText({ motion: 1 }), '1 new Ring event added.');
+  assert.strictEqual(fetchResultText({ motion: 2 }), '2 new Ring events added.');
+  assert.strictEqual(fetchResultText({ liveView: 1 }), '1 new Ring event added (live view, not counted as motion).');
+  assert.strictEqual(fetchResultText({ other: 2 }), '2 new Ring events added (not counted as motion).');
+  assert.strictEqual(fetchResultText({ motion: 1, liveView: 2 }), '3 new Ring events added (1 motion, 2 not counted as motion).');
 });

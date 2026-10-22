@@ -104,8 +104,10 @@ async function listDevices() {
   }));
 }
 
-// Motion events from Event History (GET /v1/history/devices/{device_id}/events), newest first.
-// Follows links.next for at most `maxPages` pages and keeps only motion events, normalised for the store.
+// Events from Event History (GET /v1/history/devices/{device_id}/events), newest first, normalised for the store.
+// Motion types become 'motion_detected' (the only type that counts for dose checks); every other Ring event
+// type (for example 'on_demand', a live view opened) is kept under its own type so it shows in the timeline.
+// Follows links.next for at most `maxPages` pages.
 async function fetchHistoryEvents(deviceId, { maxPages = 3 } = {}) {
   const events = [];
   let path = `/v1/history/devices/${encodeURIComponent(deviceId)}/events`;
@@ -114,8 +116,9 @@ async function fetchHistoryEvents(deviceId, { maxPages = 3 } = {}) {
     for (const e of body.data || []) {
       const kind = String(e.attributes?.event_type || '');
       const start = Number(e.attributes?.start);
-      if (!e.id || !kind.startsWith('motion') || !Number.isFinite(start)) continue;
-      events.push({ id: String(e.id), time: new Date(start).toISOString(), type: 'motion_detected', deviceId });
+      if (!e.id || !kind || !Number.isFinite(start)) continue;
+      const type = kind.startsWith('motion') ? 'motion_detected' : /^[\w.-]{1,40}$/.test(kind) ? kind : 'unknown';
+      events.push({ id: String(e.id), time: new Date(start).toISOString(), type, deviceId });
     }
     const next = body.links?.next;
     path = typeof next === 'string' && next.startsWith('/') ? next : null; // relative URL, keeps the original filters
