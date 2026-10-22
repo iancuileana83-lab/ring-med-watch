@@ -82,7 +82,8 @@
   button.plain { background:transparent; color:var(--accent); border-color:var(--line); }
   button.sim { background:var(--sim); border-color:var(--sim); color:#fff; }
   button:disabled { opacity:.6; cursor:default; }
-  .dose-row { display:grid; grid-template-columns:120px 1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
+  .dose-row { display:grid; grid-template-columns:minmax(150px, 170px) 1fr auto; gap:8px; margin-bottom:8px; align-items:center; } /* wide enough for "01:55 PM" with the clock icon */
+  .dose-row input[type=time] { min-width:0; width:100%; }
   @media (max-width:520px) { .dose-row { grid-template-columns:1fr auto; } .dose-row input[type=text] { grid-column:1 / 2; } }
   .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
