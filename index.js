@@ -151,7 +151,16 @@ async function notifyPossiblyMissed(dose) {
   await sendAlertEmail(message, MISSED_SUBJECT);
 }
 
-app.post('/internal/check-doses', requirePassword, async (req, res) => {
+// The scheduler may use CRON_TOKEN (X-Cron-Token header) instead of the dashboard password,
+// so the job config never holds the password. The token only opens this one endpoint.
+function requireCronOrPassword(req, res, next) {
+  const token = process.env.CRON_TOKEN;
+  const given = req.headers['x-cron-token'];
+  if (token && given && given.length === token.length && require('crypto').timingSafeEqual(Buffer.from(given), Buffer.from(token))) return next();
+  return requirePassword(req, res, next);
+}
+
+app.post('/internal/check-doses', requireCronOrPassword, async (req, res) => {
   try {
     res.json(await checkDoses({ store, notify: notifyPossiblyMissed }));
   } catch (err) {
