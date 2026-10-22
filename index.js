@@ -5,6 +5,7 @@ const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 
 const { listDevices, verifySignature, parseWebhook } = require('./ring');
 const { createMemoryStore } = require('./store');
+const { createDynamoStore } = require('./store-dynamodb');
 const { validateSettings, evaluateDoses, checkDoses, dayBounds } = require('./doses');
 const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt } = require('./wording');
 
@@ -12,7 +13,10 @@ const app = express();
 // Keep the raw bytes: Ring's webhook signature is computed over them.
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
-const store = createMemoryStore();
+// STORAGE_BACKEND=dynamodb keeps data across restarts; the default is in-memory (local development, tests).
+const store = process.env.STORAGE_BACKEND === 'dynamodb'
+  ? createDynamoStore({ tableName: process.env.DYNAMODB_TABLE, region: process.env.AWS_REGION || 'us-east-1', defaultTimezone: process.env.TIMEZONE || 'UTC' })
+  : createMemoryStore();
 
 // Simple password gate for the caregiver-only API (HTTP Basic, any username).
 function requirePassword(req, res, next) {
