@@ -154,5 +154,40 @@ test('daily-summary endpoint needs the cron token or password, and uses the appr
 
 test('summary prompt is exactly the approved text', () => {
   const p = summaryPrompt({ doses: [{ time: '08:00', status: 'likely_taken' }], alertsSent: 1, checkedIn: 0 });
-  assert.strictEqual(p, 'Write a short, calm daily summary (max 500 characters) for a family caregiver, using only these facts: Dose 08:00: activity seen near the pills. 1 alert emails sent, 0 checked in. For each dose say whether activity was seen near the pills or was not confirmed, or whether the dose window is still open. Mention how many alert emails were sent and how many were checked in. Never say a dose was definitely taken or definitely missed. Do not give medical advice. Never suggest taking a dose late, taking a double dose or changing any medicine, and never name a medicine. Sign it "- Ring Med Watch".');
+  assert.strictEqual(p, 'Write a short, calm daily summary (max 500 characters) for a family caregiver, using only these facts: Dose 08:00: activity seen near the pills. 1 alert emails sent, 0 checked in. For each dose say whether activity was seen near the pills or was not confirmed, or whether the dose window is still open. Mention how many alert emails were sent and how many were checked in. Never say a dose was definitely taken or definitely missed. Do not give medical advice. Never suggest taking a dose late, taking a double dose or changing any medicine, and never name a medicine. Write plain text only, with no markdown, asterisks or bold. Always say \'possibly missed\', never \'skipped\', \'forgot\' or any word that sounds certain. Sign it "- Ring Med Watch".');
+});
+
+test('both AI prompts carry the approved plain-text rule', () => {
+  const { missedPrompt } = require('../wording');
+  const rule = "Write plain text only, with no markdown, asterisks or bold. Always say 'possibly missed', never 'skipped', 'forgot' or any word that sounds certain.";
+  assert.ok(missedPrompt('08:00', '07:45', '08:45').includes(rule + ' Sign it'));
+  assert.ok(summaryPrompt({ doses: [{ time: '08:00', status: 'likely_taken' }], alertsSent: 0, checkedIn: 0 }).includes(rule + ' Sign it'));
+});
+
+test('test missed-alert endpoint sends one real-format email with a working check-in link', async () => {
+  const sent = [];
+  const saved = { g: deps.generateText, s: deps.sendAlertEmail };
+  deps.generateText = async () => 'AI text';
+  deps.sendAlertEmail = async (message, subject, extra) => sent.push({ message, subject, extra });
+  try {
+    await withServer(async (base) => {
+      await store.saveSettings({ doses: [], cameraId: 'cam', timezone: 'UTC' });
+      assert.strictEqual((await fetch(`${base}/test/trigger-missed-alert`, { method: 'POST' })).status, 401);
+      assert.strictEqual((await fetch(`${base}/test/trigger-missed-alert`, { method: 'POST', headers: auth })).status, 400);
+
+      await store.saveSettings({ doses: [{ time: '08:00', label: '' }] });
+      const r = await (await fetch(`${base}/test/trigger-missed-alert`, { method: 'POST', headers: auth })).json();
+      assert.strictEqual(r.sent, true);
+      assert.strictEqual(sent.length, 1);
+      const link = sent[0].extra.find((l) => l.startsWith('Checked in with them?'));
+      assert.ok(link, 'email carries the check-in link');
+      const token = link.split('t=')[1];
+      const page = await fetch(`${base}/checkin?t=${token}`);
+      assert.strictEqual(page.status, 200);
+      const alerts = (await (await fetch(`${base}/api/alerts`, { headers: auth })).json()).alerts;
+      assert.ok(alerts.some((a) => a.doseTime === '08:00' && a.message === 'AI text'));
+    });
+  } finally {
+    deps.generateText = saved.g; deps.sendAlertEmail = saved.s;
+  }
 });

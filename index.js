@@ -6,7 +6,7 @@ const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 const { listDevices, verifySignature, parseWebhook, ringApiConfigured } = require('./ring');
 const { createMemoryStore } = require('./store');
 const { createDynamoStore } = require('./store-dynamodb');
-const { hashToken, TOKEN_RE } = require('./checkin');
+const { newToken, hashToken, TOKEN_RE } = require('./checkin');
 const { runDailySummary } = require('./summary');
 const { DEMO_CAMERA_ID, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses, dayBounds } = require('./doses');
 const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback,
@@ -205,6 +205,23 @@ app.post('/internal/check-doses', requireCronOrPassword, async (req, res) => {
     res.json(await checkDoses({ store, notify: (dose, ctx) => notifyPossiblyMissed(dose, { ...ctx, baseUrl }) }));
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Sends one real missed-dose email for the first dose so the caregiver can check how it looks.
+// Recorded like a normal alert (with a working check-in link), under its own key.
+app.post('/test/trigger-missed-alert', requirePassword, async (req, res) => {
+  try {
+    const settings = await store.getSettings();
+    if (!settings.doses.length) return res.status(400).json({ sent: false, error: 'Set a dose time first' });
+    const now = Date.now();
+    const dose = evaluateDoses(settings, [], now)[0];
+    const token = newToken();
+    const sent = await notifyPossiblyMissed(dose, { checkinToken: token, baseUrl: publicBase(req) });
+    await store.recordAlert(`${dose.key}#test-${now}`, { sentAt: new Date(now).toISOString(), doseTime: dose.time, checkinHash: hashToken(token), ...sent });
+    res.json({ sent: true, subject: sent.subject });
+  } catch (err) {
+    res.status(500).json({ sent: false, error: err.message });
   }
 });
 

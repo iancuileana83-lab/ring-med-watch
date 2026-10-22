@@ -17,8 +17,11 @@ const FOOTER_LINES = [
 
 const MISSED_SUBJECT = 'Ring Med Watch: dose possibly missed';
 
+// Added to both AI prompts (approved by the caregiver).
+const PLAIN_TEXT_RULE = "Write plain text only, with no markdown, asterisks or bold. Always say 'possibly missed', never 'skipped', 'forgot' or any word that sounds certain.";
+
 function missedPrompt(doseTime, windowStart, windowEnd) {
-  return `Write a short, calm message (max 300 characters) to a family caregiver. No motion was seen near the pill area between ${windowStart} and ${windowEnd}, so the ${doseTime} dose was possibly missed. Motion does not prove a pill was taken, and no motion does not prove it was missed. Gently ask them to check in. Never say the dose was definitely missed. Do not give medical advice. Never suggest taking the dose late, taking a double dose or changing any medicine, and never name a medicine; only suggest checking in with the person. Sign it "- Ring Med Watch".`;
+  return `Write a short, calm message (max 300 characters) to a family caregiver. No motion was seen near the pill area between ${windowStart} and ${windowEnd}, so the ${doseTime} dose was possibly missed. Motion does not prove a pill was taken, and no motion does not prove it was missed. Gently ask them to check in. Never say the dose was definitely missed. Do not give medical advice. Never suggest taking the dose late, taking a double dose or changing any medicine, and never name a medicine; only suggest checking in with the person. ${PLAIN_TEXT_RULE} Sign it "- Ring Med Watch".`;
 }
 
 const NAV = ['Today', 'Week', 'Alerts', 'Settings', 'Privacy'];
@@ -124,7 +127,7 @@ function summaryFactsText(facts) {
 }
 
 function summaryPrompt(facts) {
-  return `Write a short, calm daily summary (max 500 characters) for a family caregiver, using only these facts: ${summaryFactsText(facts)}. For each dose say whether activity was seen near the pills or was not confirmed, or whether the dose window is still open. Mention how many alert emails were sent and how many were checked in. Never say a dose was definitely taken or definitely missed. Do not give medical advice. Never suggest taking a dose late, taking a double dose or changing any medicine, and never name a medicine. Sign it "- Ring Med Watch".`;
+  return `Write a short, calm daily summary (max 500 characters) for a family caregiver, using only these facts: ${summaryFactsText(facts)}. For each dose say whether activity was seen near the pills or was not confirmed, or whether the dose window is still open. Mention how many alert emails were sent and how many were checked in. Never say a dose was definitely taken or definitely missed. Do not give medical advice. Never suggest taking a dose late, taking a double dose or changing any medicine, and never name a medicine. ${PLAIN_TEXT_RULE} Sign it "- Ring Med Watch".`;
 }
 
 function summaryFallback(facts) {

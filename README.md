@@ -75,6 +75,7 @@ Caregiver browser -> / (dashboard) -> /api/today, /api/settings, /api/devices
 | `POST /internal/daily-summary` | password or `X-Cron-Token` | Sends the daily summary once a day (second Scheduler job) |
 | `GET`/`POST /checkin?t=<token>` | one-time token in the link | "I checked in" confirm page |
 | `POST /test/trigger-alert` | password | Sends a test email |
+| `POST /test/trigger-missed-alert` | password | Sends one real-format "possibly missed" email for the first dose, with a working check-in link, to check how it looks |
 
 Password means HTTP Basic auth with any username and `DASHBOARD_PASSWORD`.
 
