@@ -106,6 +106,24 @@ function createDynamoStore({ tableName, region, client, defaultTimezone = 'UTC' 
       }
     },
 
+    // Fill in the email text after sending; remove the reservation if sending failed.
+    async updateAlert(key, fields) {
+      const names = Object.keys(fields).filter((k) => ['subject', 'message', 'simulated'].includes(k) && fields[k] !== undefined);
+      if (!names.length) return;
+      await db.send(new UpdateCommand({
+        TableName: tableName,
+        Key: { pk: 'ALERT', sk: key },
+        UpdateExpression: 'SET ' + names.map((n, i) => `#n${i} = :v${i}`).join(', '),
+        ExpressionAttributeNames: Object.fromEntries(names.map((n, i) => [`#n${i}`, n])),
+        ExpressionAttributeValues: Object.fromEntries(names.map((n, i) => [`:v${i}`, fields[n]])),
+        ConditionExpression: 'attribute_exists(pk)'
+      }));
+    },
+
+    async releaseAlert(key) {
+      await db.send(new DeleteCommand({ TableName: tableName, Key: { pk: 'ALERT', sk: key } }));
+    },
+
     async listAlerts(fromIso, toIso) {
       const items = await queryAll({
         KeyConditionExpression: 'pk = :pk',

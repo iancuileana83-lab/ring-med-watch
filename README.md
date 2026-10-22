@@ -42,7 +42,7 @@ It is not a medical device or a substitute for medical care. If you are worried 
    - **Settings:** dose times with an optional name each (for example "Morning pills" - please no medicine names), camera, window and timezone.
    - **Privacy:** what is and is not stored.
    - A clearly labelled **Simulate motion (demo)** button adds a simulated motion event so the timeline can be shown filling in live, and "Remove simulated events" deletes only those. If no Ring camera is available, Settings always offers "Demo camera (simulation)" so the demo still works; it is labelled as a simulation wherever it appears, and no alert emails are sent while it is selected.
-3. **Gentle "possibly missed" alerts** by email through AWS SES, written by Claude on Amazon Bedrock under strict instructions (calm, never certain, no medical advice, never suggests taking a dose late or changing any medicine, never names a medicine). If the AI call fails, a fixed text with the same meaning is sent instead. One alert per dose window.
+3. **Gentle "possibly missed" alerts** by email through AWS SES, written by Claude on Amazon Bedrock under strict instructions (calm, never certain, no medical advice, never suggests taking a dose late or changing any medicine, never names a medicine). If the AI call fails, a fixed text with the same meaning is sent instead. At most one alert per dose window per day: the alert is reserved with a conditional write in DynamoDB *before* the email is sent, so overlapping checks, scheduler retries, restarts and redeploys can never send it twice (if sending fails, the reservation is released and the next check retries).
 4. **"I checked in" link.** Every missed-dose email ends with a one-time link. It opens a small page with a button (so mail scanners cannot resolve it by accident); pressing it marks the alert as checked in on the Alerts page and the Today cards. It needs no login, the token works once, and it never changes a dose status.
 5. **Daily summary email** at 20:30 Europe/Bucharest (second Cloud Scheduler job): a short AI-written summary of the day's doses, alerts and check-ins, sent once a day, skipped when no dose times are set. If simulated events exist it adds "Note: today's data includes simulated events."
 6. **Original no-motion alert.** If the front door camera sees no motion for a long time (default 12 hours), a check-in email is sent. See [Known limits](#known-limits).
@@ -83,7 +83,7 @@ Caregiver browser -> / (dashboard) -> /api/today, /api/settings, /api/devices
 | `POST /internal/daily-summary` | password or `X-Cron-Token` | Sends the daily summary once a day (second Scheduler job) |
 | `GET`/`POST /checkin?t=<token>` | one-time token in the link | "I checked in" confirm page |
 | `POST /test/trigger-alert` | password | Sends a test email |
-| `POST /test/trigger-missed-alert` | password | Sends one real-format "possibly missed" email for the first dose, with a working check-in link, to check how it looks |
+| `POST /test/trigger-missed-alert` | password | Sends one extra real-format "possibly missed" email for the first dose, with a working check-in link, to check how it looks. It is recorded as a "Test email" and is not counted in "alerts sent" or the daily summary |
 
 Password means HTTP Basic auth with any username and `DASHBOARD_PASSWORD`.
 

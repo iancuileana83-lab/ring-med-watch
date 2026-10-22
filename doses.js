@@ -118,8 +118,17 @@ async function checkDoses({ store, notify, nowMs = Date.now() }) {
     if ((await store.listAlerts(from, to)).some((a) => a.key === dose.key)) continue;
     // One-time check-in token: the email carries it, only its hash is stored.
     const token = newToken();
-    const sent = await notify(dose, { checkinToken: token }); // may return { subject, message } for the dashboard preview
-    await store.recordAlert(dose.key, { sentAt: new Date(nowMs).toISOString(), doseTime: dose.time, checkinHash: hashToken(token), ...(sent || {}) });
+    // Reserve first (a conditional write in DynamoDB): if another run already holds this dose's alert, do nothing.
+    // Reserving before sending means two overlapping checks, a retry or a restart can never both send.
+    const reserved = await store.recordAlert(dose.key, { sentAt: new Date(nowMs).toISOString(), doseTime: dose.time, checkinHash: hashToken(token) });
+    if (!reserved) continue;
+    try {
+      const sent = await notify(dose, { checkinToken: token }); // may return { subject, message } for the dashboard preview
+      if (sent) await store.updateAlert(dose.key, sent);
+    } catch (err) {
+      await store.releaseAlert(dose.key); // nothing was sent: let the next check retry
+      throw err;
+    }
     alerted.push(dose.key);
   }
   return { doses, alerted };
@@ -150,4 +159,8 @@ function weekStartIso(nowMs, tz, days = 7) {
   return new Date(zonedToUtcMs(date, '00:00', tz)).toISOString();
 }
 
-module.exports = { DEMO_CAMERA_ID, zonedToUtcMs, dayBounds, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses };
+// Alerts sent from the test endpoint have '#test-' in their key. They are extra emails to check the layout,
+// not the dose's real alert, so they never count towards "alerts sent" or the daily summary.
+const isTestAlert = (alert) => String(alert.key).includes('#test-');
+
+module.exports = { isTestAlert, DEMO_CAMERA_ID, zonedToUtcMs, dayBounds, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses };

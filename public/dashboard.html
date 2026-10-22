@@ -258,6 +258,7 @@ function el(tag, cls, text) {
 }
 
 let wording = null;
+let appVersion = null;
 let todayTimer = null;
 const PAGES = ['today', 'week', 'alerts', 'settings', 'privacy'];
 
@@ -329,11 +330,13 @@ function renderToday(d) {
     li.append(e.simulated ? el('span', 'pill sim', wording.ui.simulate.badge) : el('span', 'pill likely_taken', wording.ui.ringEventBadge));
     rows.push({ at: e.time, li });
   }
-  for (const a of d.alerts) rows.push({ at: a.sentAt, li: row(timeOf(a.sentAt, d.timezone), `Alert email sent for the ${a.doseTime} dose`, 'dot alert') });
+  for (const a of d.alerts) rows.push({ at: a.sentAt, li: row(timeOf(a.sentAt, d.timezone), isTest(a) ? `${wording.ui.testEmail} sent for the ${a.doseTime} dose` : `Alert email sent for the ${a.doseTime} dose`, 'dot alert') });
   rows.sort((a, b) => a.at.localeCompare(b.at));
   $('timeline').replaceChildren(...(rows.length ? rows.map((r) => r.li) : [el('li', 'empty', 'Nothing recorded yet today.')]));
   setFooter(d.footer);
 }
+
+const isTest = (a) => String(a.key).includes('#test-');
 
 function row(time, text, dotClass) {
   const li = el('li');
@@ -342,7 +345,11 @@ function row(time, text, dotClass) {
 }
 
 async function loadToday() {
-  try { renderToday(await api('/api/today')); } catch (err) { $('todaySub').textContent = err.message; }
+  try {
+    const d = await api('/api/today');
+    if (appVersion && d.app && d.app !== appVersion) { location.reload(); return; } // a new version was deployed
+    renderToday(d);
+  } catch (err) { $('todaySub').textContent = err.message; }
   refreshRingStatus();
 }
 
@@ -437,6 +444,7 @@ async function loadAlerts() {
     const s = el('section', 'panel');
     const top = el('div'); top.style.display = 'flex'; top.style.gap = '10px'; top.style.alignItems = 'center'; top.style.flexWrap = 'wrap';
     top.append(icon('alerts'), el('span', 'name', `${dayOf(a.sentAt, r.timezone)}, ${timeOf(a.sentAt, r.timezone)}`), el('span', 'pill not_confirmed', `${a.doseTime} dose - possibly missed`));
+    if (isTest(a)) top.append(el('span', 'pill', wording.ui.testEmail));
     if (a.simulated) top.append(el('span', 'pill sim', wording.ui.simulate.badge));
     if (a.resolvedAt) { const c = el('span', 'pill likely_taken'); c.append(icon('check'), document.createTextNode(`${wording.ui.checkedInAt} ${timeOf(a.resolvedAt, r.timezone)}`)); top.append(c); }
     else top.append(el('span', 'pill', wording.ui.notCheckedIn));
@@ -551,6 +559,7 @@ function route() {
 (async function start() {
   try {
     wording = await api('/api/wording');
+    appVersion = wording.app;
   } catch (err) { $('todaySub').textContent = err.message; return; }
   $('nav').replaceChildren(...wording.nav.map((name) => {
     const a = el('a'); a.href = `#${name.toLowerCase()}`;

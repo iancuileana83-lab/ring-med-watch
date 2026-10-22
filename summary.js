@@ -1,5 +1,5 @@
 // Daily summary email: gathers today's facts, asks the AI writer (or uses the fixed text), sends once.
-const { evaluateDoses, dayBounds } = require('./doses');
+const { evaluateDoses, dayBounds, isTestAlert } = require('./doses');
 const { summaryPrompt, summaryFallback, SIMULATED_NOTE } = require('./wording');
 
 // generate(prompt) -> text; send(message, extraLines) -> sends the email. Both are injected so this is testable.
@@ -12,7 +12,7 @@ async function runDailySummary({ store, generate, send, nowMs = Date.now() }) {
 
   try {
     const events = await store.listEvents(from, to);
-    const alerts = await store.listAlerts(from, to);
+    const alerts = (await store.listAlerts(from, to)).filter((a) => !isTestAlert(a));
     const facts = {
       doses: evaluateDoses(settings, events, nowMs).map(({ time, status }) => ({ time, status })),
       alertsSent: alerts.length,

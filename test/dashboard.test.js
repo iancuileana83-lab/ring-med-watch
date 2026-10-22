@@ -28,7 +28,7 @@ test('dashboard and /api/today need the password and return the approved wording
     assert.strictEqual(today.doses.length, 1);
     assert.deepStrictEqual(today.statusLabels, STATUS_LABELS);
     assert.deepStrictEqual(today.footer, FOOTER_LINES);
-    assert.deepStrictEqual(Object.keys(today).sort(), ['alerts', 'cameraId', 'date', 'demoCamera', 'doses', 'events', 'footer', 'statusLabels', 'summary', 'timezone']);
+    assert.deepStrictEqual(Object.keys(today).sort(), ['alerts', 'app', 'cameraId', 'date', 'demoCamera', 'doses', 'events', 'footer', 'statusLabels', 'summary', 'timezone']);
   } finally {
     server.close();
   }

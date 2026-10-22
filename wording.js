@@ -71,6 +71,8 @@ const UI = {
   },
   cameraHintNotLinked: 'The Ring camera list is not linked. Devices seen in Ring Playground events are listed instead.',
   cameraHintNoneSeen: 'No Ring Playground device seen yet. Send a test motion event from the Playground, then reload this page.',
+  testEmail: 'Test email',
+  testEmailSent: (doseTime) => `Test email sent for the ${doseTime} dose`,
   checkedIn: 'Checked in',
   checkedInAt: 'Checked in at',
   notCheckedIn: 'Not checked in yet',

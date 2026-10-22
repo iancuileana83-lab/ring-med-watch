@@ -47,6 +47,14 @@ function createMemoryStore() {
       alerts.set(key, { key, ...alert });
       return true;
     },
+    // Fill in the email text after sending; remove the reservation if sending failed.
+    async updateAlert(key, fields) {
+      const a = alerts.get(key);
+      if (a) Object.assign(a, fields);
+    },
+    async releaseAlert(key) {
+      alerts.delete(key);
+    },
     async listAlerts(fromIso, toIso) {
       return [...alerts.values()]
         .filter((a) => a.sentAt >= fromIso && a.sentAt < toIso)

@@ -8,12 +8,14 @@ const { createMemoryStore } = require('./store');
 const { createDynamoStore } = require('./store-dynamodb');
 const { newToken, hashToken, TOKEN_RE } = require('./checkin');
 const { runDailySummary } = require('./summary');
-const { DEMO_CAMERA_ID, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses, dayBounds } = require('./doses');
+const { isTestAlert, DEMO_CAMERA_ID, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses, dayBounds } = require('./doses');
 const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback,
   CHECKIN, SUMMARY_SUBJECT, DEMO_ALERT_SUFFIX, DEMO_ALERT_NOTE,
   NAV, PRIVACY_LINES, UI, EVENT_LABELS, OTHER_EVENT_PREFIX, fetchResultText, seenDeviceName, dosesSummary, alertsSummary, lastActivitySummary, houseStatus } = require('./wording');
 
 const app = express();
+// Cloud Run sets K_REVISION; an open dashboard reloads itself when it changes (after a deploy).
+const APP_VERSION = process.env.K_REVISION || 'local';
 // Keep the raw bytes: Ring's webhook signature is computed over them.
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
@@ -338,11 +340,13 @@ app.get('/api/today', requirePassword, async (req, res) => {
   const events = await store.listEvents(from, to);
   const doses = evaluateDoses(settings, events, now);
   const alerts = await store.listAlerts(from, to);
-  const resolvedKeys = new Set(alerts.filter((a) => a.resolvedAt).map((a) => a.key));
+  const realAlerts = alerts.filter((a) => !isTestAlert(a));
+  const resolvedKeys = new Set(realAlerts.filter((a) => a.resolvedAt).map((a) => a.key));
   const lastNear = [...events].reverse().find((e) => e.type === 'motion_detected' && e.deviceId === settings.cameraId);
   res.json({
     date,
     timezone: settings.timezone,
+    app: APP_VERSION,
     cameraId: settings.cameraId,
     demoCamera: settings.cameraId === DEMO_CAMERA_ID,
     doses: doses.map((d) => (resolvedKeys.has(d.key) ? { ...d, checkedIn: true } : d)),
@@ -350,7 +354,7 @@ app.get('/api/today', requirePassword, async (req, res) => {
     alerts,
     summary: {
       doses: dosesSummary(doses.length, doses.filter((d) => d.status === 'likely_taken').length, doses.filter((d) => d.status === 'not_confirmed').length),
-      alerts: alertsSummary(alerts.length, resolvedKeys.size),
+      alerts: alertsSummary(realAlerts.length, resolvedKeys.size),
       last: lastActivitySummary(lastNear ? clock(lastNear.time, settings.timezone) : null, true, settings.cameraId === DEMO_CAMERA_ID),
       house: houseStatus(await hoursSinceLastMotion(now), NO_MOTION_ALERT_HOURS)
     },
@@ -377,7 +381,7 @@ app.get('/api/alerts', requirePassword, async (req, res) => {
 
 // Approved wording used by every dashboard page.
 app.get('/api/wording', requirePassword, (req, res) => {
-  res.json({ nav: NAV, privacy: PRIVACY_LINES, ui: UI, eventLabels: EVENT_LABELS, otherEventPrefix: OTHER_EVENT_PREFIX, demoCameraId: DEMO_CAMERA_ID, footer: FOOTER_LINES, statusLabels: STATUS_LABELS });
+  res.json({ app: APP_VERSION, nav: NAV, privacy: PRIVACY_LINES, ui: UI, eventLabels: EVENT_LABELS, otherEventPrefix: OTHER_EVENT_PREFIX, demoCameraId: DEMO_CAMERA_ID, footer: FOOTER_LINES, statusLabels: STATUS_LABELS });
 });
 
 // Demo only: adds a motion event marked as a simulation at the chosen camera.
