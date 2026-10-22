@@ -108,21 +108,37 @@ async function listDevices() {
 // Motion types become 'motion_detected' (the only type that counts for dose checks); every other Ring event
 // type (for example 'on_demand', a live view opened) is kept under its own type so it shows in the timeline.
 // Follows links.next for at most `maxPages` pages.
+// Ring documents start/end as epoch milliseconds; also accept seconds, numeric strings and ISO strings.
+function ringTimeMs(value) {
+  const n = typeof value === 'string' && /^\d+(\.\d+)?$/.test(value.trim()) ? Number(value) : value;
+  if (typeof n === 'number' && Number.isFinite(n)) return n >= 1e12 ? n : n >= 1e9 ? n * 1000 : NaN;
+  const t = typeof n === 'string' ? Date.parse(n) : NaN;
+  return t;
+}
+
+// The returned array has a non-enumerable `stats` property: what Ring sent and what was skipped (no secrets).
 async function fetchHistoryEvents(deviceId, { maxPages = 3 } = {}) {
   const events = [];
+  const stats = { pages: 0, received: 0, types: {}, skipped: { noType: 0, badTime: 0 } };
   let path = `/v1/history/devices/${encodeURIComponent(deviceId)}/events`;
   for (let page = 0; page < maxPages && path; page++) {
     const body = await ringGet(path);
+    stats.pages++;
     for (const e of body.data || []) {
+      stats.received++;
       const kind = String(e.attributes?.event_type || '');
-      const start = Number(e.attributes?.start);
-      if (!e.id || !kind || !Number.isFinite(start)) continue;
+      stats.types[kind || '(none)'] = (stats.types[kind || '(none)'] || 0) + 1;
+      const start = ringTimeMs(e.attributes?.start ?? e.attributes?.end);
+      if (!kind) { stats.skipped.noType++; continue; }
+      if (!Number.isFinite(start)) { stats.skipped.badTime++; continue; }
       const type = kind.startsWith('motion') ? 'motion_detected' : /^[\w.-]{1,40}$/.test(kind) ? kind : 'unknown';
-      events.push({ id: String(e.id), time: new Date(start).toISOString(), type, deviceId });
+      // Ring gives every event an id; if one were missing, build a stable one so the event is not lost.
+      events.push({ id: e.id ? String(e.id) : `${deviceId}:${kind}:${start}`, time: new Date(start).toISOString(), type, deviceId });
     }
     const next = body.links?.next;
     path = typeof next === 'string' && next.startsWith('/') ? next : null; // relative URL, keeps the original filters
   }
+  Object.defineProperty(events, 'stats', { value: stats, enumerable: false });
   return events;
 }
 

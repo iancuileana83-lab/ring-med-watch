@@ -174,6 +174,8 @@ app.post('/api/ring/fetch-events', requirePassword, async (req, res) => {
       if (!(await store.addEvent(e))) continue; // addEvent ignores ids it already has
       counts[e.type === 'motion_detected' ? 'motion' : e.type === 'on_demand' ? 'liveView' : 'other']++;
     }
+    // Counts and event type names only: no token, no Ring ids.
+    console.log(`Ring history fetch: ${JSON.stringify({ ...events.stats, added: counts })}`);
     res.json({ fetched: events.length, added: counts.motion + counts.liveView + counts.other, ...counts, message: fetchResultText(counts) });
   } catch (err) {
     console.warn('Ring event fetch failed:', err.message);

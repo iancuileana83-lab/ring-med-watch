@@ -220,3 +220,37 @@ test('fetch messages for each mix of event kinds', () => {
   assert.strictEqual(fetchResultText({ other: 2 }), '2 new Ring events added (not counted as motion).');
   assert.strictEqual(fetchResultText({ motion: 1, liveView: 2 }), '3 new Ring events added (1 motion, 2 not counted as motion).');
 });
+
+test('history parsing: odd time formats, missing id, and stats that explain what was skipped', async () => {
+  setPlaygroundToken(SECRET);
+  const secs = 1792660000; // epoch seconds
+  ringHandler = () => ({ status: 200, body: { data: [
+    { type: 'history-events', id: 'a', attributes: { event_type: 'on_demand', start: String(Date.parse('2026-10-22T10:05:00Z')) } },
+    { type: 'history-events', id: 'b', attributes: { event_type: 'on_demand', start: secs } },
+    { type: 'history-events', attributes: { event_type: 'on_demand', start: '2026-10-22T10:06:00Z' } },
+    { type: 'history-events', id: 'd', attributes: { event_type: 'on_demand', start: 'not a time' } },
+    { type: 'history-events', id: 'e', attributes: { start: Date.now() } }
+  ] } });
+  const events = await fetchHistoryEvents(DEVICE);
+  assert.deepStrictEqual(events.map((e) => e.time), ['2026-10-22T10:05:00.000Z', new Date(secs * 1000).toISOString(), '2026-10-22T10:06:00.000Z']);
+  assert.ok(events[2].id.includes(':on_demand:'), 'synthesised id when Ring sent none');
+  assert.deepStrictEqual(events.stats, { pages: 1, received: 5, types: { on_demand: 4, '(none)': 1 }, skipped: { noType: 1, badTime: 1 } });
+  assert.ok(!JSON.stringify(events.stats).includes(SECRET));
+});
+
+test('a live-view event is stored on the first fetch and not re-added on the next', async () => {
+  const CAM = 'ava1.ring.device.DEDUPCHECK';
+  await store.saveSettings({ cameraId: CAM });
+  setPlaygroundToken(SECRET);
+  ringHandler = () => ({ status: 200, body: { data: [historyEvent('od-77', 'on_demand', new Date().toISOString())] } });
+  await withServer(async (base) => {
+    const logs = await captureConsole(async () => {
+      const a = await (await fetch(`${base}/api/ring/fetch-events`, { method: 'POST', headers: auth })).json();
+      assert.strictEqual(a.added, 1);
+      const b = await (await fetch(`${base}/api/ring/fetch-events`, { method: 'POST', headers: auth })).json();
+      assert.strictEqual(b.added, 0);
+    });
+    assert.ok(logs.includes('Ring history fetch:') && logs.includes('"on_demand":1'));
+    assert.ok(!logs.includes(SECRET));
+  });
+});
