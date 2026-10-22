@@ -7,7 +7,8 @@ const app = express();
 app.use(express.json());
 
 const NO_MOTION_ALERT_HOURS = Number(process.env.NO_MOTION_ALERT_HOURS || 12);
-const ALERT_EMAIL = process.env.ALERT_EMAIL || 'maziluileana88@gmail.com';
+const ALERT_EMAIL = process.env.ALERT_EMAIL;
+if (!ALERT_EMAIL) console.warn('ALERT_EMAIL is not set; alert emails will fail until it is.');
 
 let lastMotionAt = new Date();
 let alreadyAlerted = false;
