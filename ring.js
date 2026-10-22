@@ -2,22 +2,69 @@ const crypto = require('crypto');
 
 const API_BASE = 'https://api.amazonvision.com';
 const TOKEN_URL = 'https://oauth.ring.com/oauth/token';
+const PLAYGROUND_TOKEN_MINUTES = 30;
 
+// Ring's docs require User-Agent ("AppName/version") and Hardware_Id (a UUID) on requests, else HTTP 406.
+const USER_AGENT = 'ring-med-watch/1.0';
+const HARDWARE_ID = (() => {
+  const h = crypto.createHash('sha256').update('ring-med-watch').digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+})();
+
+// Error from a Ring call. Messages never contain a token or a response body.
+class RingError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = 'RingError';
+    this.status = status || null;
+  }
+}
+
+/* ---------- Ring Playground token: memory only, 30-minute expiry, never logged or returned ---------- */
+let playground = null; // { token, expiresAt }
+
+function setPlaygroundToken(token, nowMs = Date.now()) {
+  if (typeof token !== 'string' || !/^[\x21-\x7e]{20,4096}$/.test(token.trim())) {
+    throw new Error('That does not look like a Ring token');
+  }
+  playground = { token: token.trim(), expiresAt: nowMs + PLAYGROUND_TOKEN_MINUTES * 60000 };
+}
+
+// What the dashboard may know: whether it is connected and until when. Never the token.
+function playgroundStatus(nowMs = Date.now()) {
+  if (!playground) return { state: 'none', until: null };
+  if (playground.expiresAt <= nowMs) return { state: 'expired', until: new Date(playground.expiresAt).toISOString() };
+  return { state: 'connected', until: new Date(playground.expiresAt).toISOString() };
+}
+
+/* ---------- Access token: Playground token if valid, else refresh-token flow ---------- */
 let cachedToken = null;
-
-// Exchanges the refresh token for a short-lived access token (Ring Partner API).
 // Ring may rotate the refresh token; the new one is kept in memory only.
 let refreshToken = process.env.RING_REFRESH_TOKEN;
 
+function refreshConfigured() {
+  return Boolean(process.env.RING_CLIENT_ID && process.env.RING_CLIENT_SECRET && refreshToken);
+}
+
+// 'ok' | 'token_expired' | 'not_linked'
+function ringApiState(nowMs = Date.now()) {
+  if (playgroundStatus(nowMs).state === 'connected' || refreshConfigured()) return 'ok';
+  return playground ? 'token_expired' : 'not_linked';
+}
+
+function ringApiConfigured() {
+  return ringApiState() === 'ok';
+}
+
 async function getAccessToken() {
-  if (cachedToken && cachedToken.expiresAt > Date.now() + 30000) return cachedToken.value;
-  if (!process.env.RING_CLIENT_ID || !process.env.RING_CLIENT_SECRET || !refreshToken) {
-    throw new Error('Ring credentials are not configured (RING_CLIENT_ID, RING_CLIENT_SECRET, RING_REFRESH_TOKEN)');
+  if (playgroundStatus().state === 'connected') return playground.token;
+  if (!refreshConfigured()) {
+    throw new RingError(playground ? 'The Ring Playground token expired' : 'Ring is not connected');
   }
+  if (cachedToken && cachedToken.expiresAt > Date.now() + 30000) return cachedToken.value;
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
-    // Ring's docs say requests to oauth.ring.com must carry User-Agent and Hardware_Id (else HTTP 406).
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'ring-med-watch/1.0', Hardware_Id: 'ring-med-watch' },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT, Hardware_Id: HARDWARE_ID },
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       client_id: process.env.RING_CLIENT_ID,
@@ -25,7 +72,7 @@ async function getAccessToken() {
       refresh_token: refreshToken
     })
   });
-  if (!res.ok) throw new Error(`Ring token refresh failed: HTTP ${res.status}`);
+  if (!res.ok) throw new RingError(`Ring token refresh failed: HTTP ${res.status}`, res.status);
   const body = await res.json();
   if (body.refresh_token) refreshToken = body.refresh_token;
   cachedToken = { value: body.access_token, expiresAt: Date.now() + (body.expires_in || 3600) * 1000 };
@@ -34,19 +81,46 @@ async function getAccessToken() {
 
 async function ringGet(path) {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${await getAccessToken()}`, Accept: 'application/vnd.api+json' }
+    headers: {
+      Authorization: `Bearer ${await getAccessToken()}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'User-Agent': USER_AGENT,
+      Hardware_Id: HARDWARE_ID
+    }
   });
-  if (!res.ok) throw new Error(`Ring API ${path} failed: HTTP ${res.status}`);
+  if (res.status === 401 || res.status === 403) throw new RingError('Ring rejected the token', res.status);
+  if (res.status === 406) throw new RingError('Ring blocked this request (HTTP 406). Ring may block requests from cloud servers', 406);
+  if (!res.ok) throw new RingError(`Ring API request failed: HTTP ${res.status}`, res.status);
   return res.json();
 }
 
-// Lists the Ring cameras linked to the account as { id, name }.
+// Lists the Ring cameras visible to the token as { id, name } (GET /v1/devices).
 async function listDevices() {
   const body = await ringGet('/v1/devices');
   return (body.data || []).map((d) => ({
     id: d.id,
     name: d.attributes?.name || d.attributes?.description || d.id
   }));
+}
+
+// Motion events from Event History (GET /v1/history/devices/{device_id}/events), newest first.
+// Follows links.next for at most `maxPages` pages and keeps only motion events, normalised for the store.
+async function fetchHistoryEvents(deviceId, { maxPages = 3 } = {}) {
+  const events = [];
+  let path = `/v1/history/devices/${encodeURIComponent(deviceId)}/events`;
+  for (let page = 0; page < maxPages && path; page++) {
+    const body = await ringGet(path);
+    for (const e of body.data || []) {
+      const kind = String(e.attributes?.event_type || '');
+      const start = Number(e.attributes?.start);
+      if (!e.id || !kind.startsWith('motion') || !Number.isFinite(start)) continue;
+      events.push({ id: String(e.id), time: new Date(start).toISOString(), type: 'motion_detected', deviceId });
+    }
+    const next = body.links?.next;
+    path = typeof next === 'string' && next.startsWith('/') ? next : null; // relative URL, keeps the original filters
+  }
+  return events;
 }
 
 // Webhook v1.1 signature: X-Signature = "sha256=" + hex HMAC-SHA256 of the raw body.
@@ -86,9 +160,7 @@ function deviceIdOf(payload) {
   return m ? m[1] : null;
 }
 
-// True when the Ring credentials needed for the Devices API are present.
-function ringApiConfigured() {
-  return Boolean(process.env.RING_CLIENT_ID && process.env.RING_CLIENT_SECRET && process.env.RING_REFRESH_TOKEN);
-}
-
-module.exports = { listDevices, verifySignature, parseWebhook, ringApiConfigured };
+module.exports = {
+  RingError, listDevices, fetchHistoryEvents, verifySignature, parseWebhook,
+  ringApiConfigured, ringApiState, setPlaygroundToken, playgroundStatus
+};

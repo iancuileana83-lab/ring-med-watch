@@ -33,6 +33,7 @@ const PRIVACY_LINES = [
   'Events and alert records are deleted automatically after 30 days.',
   'Events from the "Simulate motion" demo button are marked as simulations and can be removed at any time.',
   'The dashboard and the settings are protected by a password.',
+  'A Ring Playground token, if you paste one, is kept only in memory for 30 minutes and is never stored or logged.',
   'Each alert email has a one-time check-in link. Only a hash of its token is stored.',
   "Alert emails and the daily summary are written by Amazon Bedrock. The only information sent to the model is dose times, dose windows, and for the daily summary each dose's status and the number of alerts sent and checked in."
 ];
@@ -52,6 +53,23 @@ const UI = {
   },
   // PROPOSED wording for real Ring (Playground) events and camera list, pending approval.
   ringEventBadge: 'Ring Playground event',
+  // PROPOSED wording for the Ring Playground token and Fetch Ring events, pending approval.
+  token: {
+    heading: 'Ring Playground token',
+    hint: 'Paste the temporary token from the Ring Playground. It is kept only in memory for 30 minutes and is never shown or logged.',
+    connect: 'Connect',
+    notConnected: 'Not connected',
+    expired: 'Token expired',
+    connectedUntil: 'Connected to Ring Playground until',
+    fetch: 'Fetch Ring events',
+    needToken: 'Connect a Ring Playground token first',
+    needCamera: 'Choose a Ring camera in Settings first',
+    added: 'new events added.',
+    none: 'No new events.',
+    cameraHintExpired: 'The Ring Playground token expired. Paste a new one to refresh the camera list.',
+    cameraHintRejected: 'Ring rejected the token. Paste a new one to refresh the camera list.',
+    cameraHintError: 'The Ring camera list could not be loaded. Devices seen in Ring Playground events are listed instead.'
+  },
   cameraHintNotLinked: 'The Ring camera list is not linked. Devices seen in Ring Playground events are listed instead.',
   cameraHintNoneSeen: 'No Ring Playground device seen yet. Send a test motion event from the Playground, then reload this page.',
   checkedIn: 'Checked in',

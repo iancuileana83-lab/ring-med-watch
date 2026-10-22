@@ -8,6 +8,12 @@ Built for the Amazon "Build, Ship, Shape" Developer Hackathon, Ring track (caret
 
 The Ring Playground can send test motion events with the real Ring v1.1 payload to `POST /webhooks/ring`. When `RING_HMAC_KEY` is set, only events signed by Ring (`X-Signature: sha256=<hex HMAC-SHA256 of the raw body>`) are accepted; anything else gets HTTP 401. Accepted events are stored as real events and shown in the dashboard timeline with a "Ring Playground event" label, unlike events from the demo button, which are labelled "Simulation". In Settings, the camera list shows devices seen in these events, so a Playground device can be chosen as the "camera near the pills" without linking a Ring account.
 
+### Playground token and Ring Event History
+
+The Playground also generates a temporary OAuth token (valid 30 minutes). In **Settings > Ring Playground token** the caregiver pastes it. It is kept **only in memory** for 30 minutes, never stored, shown or logged; the page shows "Connected to Ring Playground until HH:MM" or "Token expired". With the token the app calls the real Ring APIs from Ring's documentation: `GET /v1/devices` fills the camera dropdown with the Playground device name, and **Fetch Ring events** calls `GET /v1/history/devices/{device_id}/events` for the chosen camera (following `links.next`), keeps the motion events, and adds the new ones to the timeline and dose checks (deduplicated by Ring's event id, labelled "Ring Playground event"). Requests carry the `Authorization`, `User-Agent` and `Hardware_Id` headers Ring requires. The webhook with HMAC verification keeps working in parallel.
+
+Because the token is only in memory, it is lost when the Cloud Run instance restarts; paste a new one when needed.
+
 ## What it can and cannot tell you
 
 Motion near the pills does not prove a pill was taken, and no motion does not prove one was missed. Ring Med Watch only sees motion at one camera, so it never says "taken" or "missed" as a fact. The wording everywhere is "activity seen near the pills (not a confirmation)", "no activity seen near the pills - not confirmed" and "possibly missed".
@@ -69,7 +75,9 @@ Caregiver browser -> / (dashboard) -> /api/today, /api/settings, /api/devices
 | `GET`/`PUT /api/settings` | password | Dose times, window, camera, timezone |
 | `GET /api/week`, `GET /api/alerts`, `GET /api/wording` | password | Week grid, alert history with email text, approved wording |
 | `POST /api/simulate-motion`, `DELETE /api/simulated-events` | password | Demo button: add / remove simulated motion events |
-| `GET /api/devices` | password | Ring cameras on the linked account |
+| `GET /api/devices` | password | Ring cameras: from the Ring API when a token is connected, plus devices seen in Ring events |
+| `PUT /api/ring/token`, `GET /api/ring/status` | password | Paste the Playground token (memory only) / connection status |
+| `POST /api/ring/fetch-events` | password | Pull motion events from Ring Event History for the chosen camera |
 | `GET /api/events` | password | Recorded events (time, type, camera) |
 | `POST /internal/check-doses` | password or `X-Cron-Token` | Checks dose windows and sends alerts (called by Cloud Scheduler) |
 | `POST /internal/daily-summary` | password or `X-Cron-Token` | Sends the daily summary once a day (second Scheduler job) |
@@ -130,6 +138,8 @@ The first version (15 Sep 2026) had a single rule: no motion at the front door f
 
 ## Known limits
 
+- Ring's docs say requests from cloud (datacenter) IP addresses may get HTTP 406. If Ring blocks the Cloud Run address, the Playground calls fail with a clear message while the signed webhook still works.
+- An event that arrives by webhook and the same motion fetched from Event History have different ids, so it can appear twice.
 - Full Ring OAuth account linking is not built. Without a refresh token, the camera list uses devices seen in Ring (Playground) events instead of the Ring Devices API.
 - Testing so far uses the Ring Playground sandbox and fake events, not a real camera at someone's home.
 - The camera list (`GET /v1/devices`) and the token refresh are written from Ring's documentation and covered by unit tests with fakes. They have not yet been run against the live Ring API.

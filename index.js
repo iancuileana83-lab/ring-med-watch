@@ -3,7 +3,7 @@ const express = require('express');
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 
-const { listDevices, verifySignature, parseWebhook, ringApiConfigured } = require('./ring');
+const { listDevices, fetchHistoryEvents, verifySignature, parseWebhook, ringApiState, setPlaygroundToken, playgroundStatus, RingError } = require('./ring');
 const { createMemoryStore } = require('./store');
 const { createDynamoStore } = require('./store-dynamodb');
 const { newToken, hashToken, TOKEN_RE } = require('./checkin');
@@ -125,14 +125,14 @@ app.post('/webhooks/ring', async (req, res) => {
 // Cameras to choose from: the linked Ring account (when a refresh token is configured) plus any device
 // seen in real Ring events (for example from the Ring Playground), so the list works without account linking.
 app.get('/api/devices', requirePassword, async (req, res) => {
-  let ringApi = ringApiConfigured() ? 'ok' : 'not_linked';
+  let ringApi = ringApiState(); // 'ok' | 'token_expired' | 'not_linked'
   let apiDevices = [];
   if (ringApi === 'ok') {
     try {
       apiDevices = (await listDevices()).map((d) => ({ ...d, source: 'ring-api' }));
     } catch (err) {
-      console.warn('Ring camera list unavailable:', err.message);
-      ringApi = 'error';
+      console.warn('Ring camera list unavailable:', err.message); // messages never contain the token
+      ringApi = err instanceof RingError && (err.status === 401 || err.status === 403) ? 'token_rejected' : 'error';
     }
   }
   const now = Date.now();
@@ -141,6 +141,41 @@ app.get('/api/devices', requirePassword, async (req, res) => {
   const seen = [...new Set(events.filter((e) => !e.simulated && e.deviceId && !known.has(e.deviceId)).map((e) => e.deviceId))]
     .map((id) => ({ id, name: seenDeviceName(id), source: 'ring-events' }));
   res.json({ devices: [...apiDevices, ...seen], ringApi });
+});
+
+// ---- Ring Playground token: pasted by the caregiver, kept only in memory for 30 minutes ----
+const ringStatusJson = async () => {
+  const s = playgroundStatus();
+  return { state: s.state, until: s.until, timezone: (await store.getSettings()).timezone };
+};
+
+app.get('/api/ring/status', requirePassword, async (req, res) => {
+  res.json(await ringStatusJson());
+});
+
+app.put('/api/ring/token', requirePassword, async (req, res) => {
+  try {
+    setPlaygroundToken(req.body && req.body.token); // never logged, never echoed back
+    res.json(await ringStatusJson());
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Pulls motion events from Ring Event History for the chosen camera into the timeline and dose checks.
+app.post('/api/ring/fetch-events', requirePassword, async (req, res) => {
+  const { cameraId } = await store.getSettings();
+  if (playgroundStatus().state !== 'connected') return res.status(400).json({ error: 'Connect a Ring Playground token first' });
+  if (!cameraId || cameraId === DEMO_CAMERA_ID) return res.status(400).json({ error: 'Choose a Ring camera in Settings first' });
+  try {
+    const events = await fetchHistoryEvents(cameraId);
+    let added = 0;
+    for (const e of events) if (await store.addEvent(e)) added++; // addEvent ignores ids it already has
+    res.json({ fetched: events.length, added });
+  } catch (err) {
+    console.warn('Ring event fetch failed:', err.message);
+    res.status(err instanceof RingError && err.status === 401 ? 401 : 502).json({ error: err.message });
+  }
 });
 
 app.get('/api/settings', requirePassword, async (req, res) => {

@@ -77,7 +77,7 @@
 
   label { display:block; margin:12px 0 4px; font-weight:600; }
   input, select, button { font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--text); min-height:44px; }
-  input[type=text], input[type=number], select { width:100%; }
+  input[type=text], input[type=number], input[type=password], select { width:100%; }
   button { background:var(--accent); border-color:var(--accent); color:var(--on-accent); font-weight:700; cursor:pointer; }
   button.plain { background:transparent; color:var(--accent); border-color:var(--line); }
   button.sim { background:var(--sim); border-color:var(--sim); color:#fff; }
@@ -85,6 +85,7 @@
   .dose-row { display:grid; grid-template-columns:120px 1fr auto; gap:8px; margin-bottom:8px; align-items:center; }
   @media (max-width:520px) { .dose-row { grid-template-columns:1fr auto; } .dose-row input[type=text] { grid-column:1 / 2; } }
   .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
   .hint, .msg { color:var(--muted); font-size:.9rem; margin:6px 0 0; }
   .msg { min-height:1.4em; }
 
@@ -153,6 +154,13 @@
       <div class="msg" id="simMsg" role="status"></div>
     </div>
 
+    <section class="panel" id="ringPanel">
+      <h2 id="ringPanelTitle"></h2>
+      <p class="hint" id="ringStatusToday"></p>
+      <div class="btns"><button type="button" id="fetchBtn"></button></div>
+      <div class="msg" id="fetchMsg" role="status"></div>
+    </section>
+
     <section class="panel"><h2>Doses</h2><ul class="list" id="doses"></ul></section>
     <section class="panel"><h2>Timeline</h2><ul class="list" id="timeline"></ul></section>
   </div>
@@ -175,6 +183,16 @@
 
   <div id="p-settings" class="page" hidden>
     <h1>Settings</h1>
+    <section class="panel">
+      <h2 id="tokenHeading"></h2>
+      <p class="hint" id="tokenHint"></p>
+      <form id="tokenForm" autocomplete="off">
+        <label for="ringToken" class="sr">Ring Playground token</label>
+        <input id="ringToken" type="password" autocomplete="off" spellcheck="false" autocapitalize="off">
+        <p><button type="submit" id="tokenBtn"></button></p>
+        <div class="msg" id="ringStatusSettings" role="status"></div>
+      </form>
+    </section>
     <section class="panel">
       <form id="form">
         <label>Dose times</label>
@@ -320,6 +338,7 @@ function row(time, text, dotClass) {
 
 async function loadToday() {
   try { renderToday(await api('/api/today')); } catch (err) { $('todaySub').textContent = err.message; }
+  refreshRingStatus();
 }
 
 async function simulate(path, method, msgText) {
@@ -329,6 +348,31 @@ async function simulate(path, method, msgText) {
     $('simMsg').textContent = msgText(r);
     await loadToday();
   } catch (err) { $('simMsg').textContent = err.message; }
+}
+
+/* ---------- Ring Playground token and event fetch ---------- */
+async function refreshRingStatus() {
+  try {
+    const s = await api('/api/ring/status');
+    const t = wording.ui.token;
+    const text = s.state === 'connected' ? `${t.connectedUntil} ${timeOf(s.until, s.timezone)}` : s.state === 'expired' ? t.expired : t.notConnected;
+    $('ringStatusToday').textContent = text;
+    $('ringStatusSettings').textContent = text;
+    return s;
+  } catch (err) { $('ringStatusToday').textContent = err.message; }
+}
+
+async function fetchRingEvents() {
+  const t = wording.ui.token;
+  $('fetchMsg').textContent = '...';
+  try {
+    const r = await api('/api/ring/fetch-events', { method: 'POST' });
+    $('fetchMsg').textContent = r.added ? `${r.added} ${t.added}` : t.none;
+    await loadToday();
+  } catch (err) {
+    $('fetchMsg').textContent = err.message;
+  }
+  refreshRingStatus();
 }
 
 /* ---------- Week ---------- */
@@ -418,6 +462,10 @@ function addDoseInput(time = '', label = '') {
 
 async function loadSettings() {
   $('labelHint').textContent = wording.ui.labelHint;
+  $('tokenHeading').textContent = wording.ui.token.heading;
+  $('tokenHint').textContent = wording.ui.token.hint;
+  $('tokenBtn').textContent = wording.ui.token.connect;
+  refreshRingStatus();
   const s = await api('/api/settings');
   $('doseInputs').replaceChildren();
   s.doses.forEach((x) => addDoseInput(x.time, x.label || ''));
@@ -433,7 +481,10 @@ async function loadSettings() {
     const r = await api('/api/devices');
     r.devices.forEach((dev) => { sel.append(new Option(dev.name, dev.id)); ids.add(dev.id); });
     const hints = [];
-    if (r.ringApi !== 'ok') hints.push(wording.ui.cameraHintNotLinked);
+    if (r.ringApi === 'token_expired') hints.push(wording.ui.token.cameraHintExpired);
+    else if (r.ringApi === 'token_rejected') hints.push(wording.ui.token.cameraHintRejected);
+    else if (r.ringApi === 'error') hints.push(wording.ui.token.cameraHintError);
+    else if (r.ringApi !== 'ok') hints.push(wording.ui.cameraHintNotLinked);
     if (!r.devices.length) hints.push(wording.ui.cameraHintNoneSeen);
     $('camHint').textContent = hints.join(' ');
   } catch (err) {
@@ -507,6 +558,20 @@ function route() {
   $('simClear').textContent = sim.clear;
   $('simBtn').onclick = () => simulate('/api/simulate-motion', 'POST', () => sim.badge + ': motion added.');
   $('simClear').onclick = () => simulate('/api/simulated-events', 'DELETE', (r) => `${r.removed} simulated event(s) removed.`);
+  $('ringPanelTitle').textContent = wording.ui.token.heading;
+  $('fetchBtn').textContent = wording.ui.token.fetch;
+  $('fetchBtn').onclick = fetchRingEvents;
+  $('tokenForm').onsubmit = async (ev) => {
+    ev.preventDefault();
+    const field = $('ringToken');
+    const token = field.value;
+    field.value = ''; // the token is never kept in the page
+    try {
+      await api('/api/ring/token', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+      await refreshRingStatus();
+      loadSettings();
+    } catch (err) { $('ringStatusSettings').textContent = err.message; }
+  };
   window.addEventListener('hashchange', route);
   route();
 })();
