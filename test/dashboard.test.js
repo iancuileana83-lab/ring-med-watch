@@ -26,7 +26,7 @@ test('dashboard and /api/today need the password and return the approved wording
     assert.strictEqual(today.doses.length, 1);
     assert.deepStrictEqual(today.statusLabels, STATUS_LABELS);
     assert.deepStrictEqual(today.footer, FOOTER_LINES);
-    assert.deepStrictEqual(Object.keys(today).sort(), ['alerts', 'cameraId', 'date', 'doses', 'events', 'footer', 'statusLabels', 'summary', 'timezone']);
+    assert.deepStrictEqual(Object.keys(today).sort(), ['alerts', 'cameraId', 'date', 'demoCamera', 'doses', 'events', 'footer', 'statusLabels', 'summary', 'timezone']);
   } finally {
     server.close();
   }
@@ -108,4 +108,26 @@ test('house status wording', () => {
   assert.strictEqual(dosesSummary(2, 1, 0), '2 scheduled · 1 activity seen · 0 not confirmed');
   assert.strictEqual(lastActivitySummary(null, true), 'No activity yet today');
   assert.strictEqual(lastActivitySummary('08:12', true), '08:12 at the camera near the pills');
+});
+
+test('demo camera: simulation works, is labelled, and never triggers alert emails', async () => {
+  const server = app.listen(0);
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const json = { ...auth, 'Content-Type': 'application/json' };
+  try {
+    await store.saveSettings({ doses: [{ time: '00:00', label: '' }], cameraId: 'demo-camera', windowBeforeMinutes: 0, windowAfterMinutes: 1 });
+    assert.strictEqual((await fetch(`${base}/api/wording`, { headers: auth }).then((r) => r.json())).demoCameraId, 'demo-camera');
+    assert.strictEqual((await fetch(`${base}/api/simulate-motion`, { method: 'POST', headers: json, body: '{}' })).status, 200);
+    const today = await (await fetch(`${base}/api/today`, { headers: auth })).json();
+    assert.strictEqual(today.demoCamera, true);
+    assert.ok(today.summary.last.endsWith('at the demo camera (simulation)'), today.summary.last);
+    // A dose window that already ended with no real motion would normally email; with the demo camera it must not.
+    const check = await (await fetch(`${base}/internal/check-doses`, { method: 'POST', headers: json, body: '{}' })).json();
+    assert.deepStrictEqual(check.alerted, []);
+    assert.strictEqual(check.skipped, 'demo camera');
+    assert.strictEqual((await (await fetch(`${base}/api/week`, { headers: auth })).json()).demoCamera, true);
+  } finally {
+    await store.deleteSimulatedEvents();
+    server.close();
+  }
 });

@@ -46,7 +46,8 @@ const UI = {
     badge: 'Simulation',
     clear: 'Remove simulated events'
   },
-  labelHint: 'Optional name for this dose, like Morning pills. Please do not enter medicine names.'
+  labelHint: 'Optional name for this dose, like Morning pills. Please do not enter medicine names.',
+  demoCamera: 'Demo camera (simulation)'
 };
 
 function dosesSummary(scheduled, seen, notConfirmed) {
@@ -57,8 +58,9 @@ function alertsSummary(count) {
   return `${count} today`;
 }
 
-function lastActivitySummary(time, atChosenCamera) {
+function lastActivitySummary(time, atChosenCamera, isDemoCamera = false) {
   if (!time) return 'No activity yet today';
+  if (isDemoCamera) return `${time} at the demo camera (simulation)`;
   return `${time} at ${atChosenCamera ? 'the camera near the pills' : 'another camera'}`;
 }
 

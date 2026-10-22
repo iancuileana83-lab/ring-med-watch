@@ -1,7 +1,10 @@
 // Dose-window logic. Motion near the pills is only a hint, never proof of a dose:
 // statuses are "likely_taken" / "not_confirmed", and callers must word them that way.
 
-const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+// Stand-in camera for demos when no Ring camera is available. It only ever receives simulated events.
+const DEMO_CAMERA_ID = 'demo-camera';
+
+const TIME_RE =/^([01]\d|2[0-3]):([0-5]\d)$/;
 
 function offsetMs(utcMs, tz) {
   const p = Object.fromEntries(
@@ -143,4 +146,4 @@ function weekStartIso(nowMs, tz, days = 7) {
   return new Date(zonedToUtcMs(date, '00:00', tz)).toISOString();
 }
 
-module.exports = { zonedToUtcMs, dayBounds, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses };
+module.exports = { DEMO_CAMERA_ID, zonedToUtcMs, dayBounds, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses };

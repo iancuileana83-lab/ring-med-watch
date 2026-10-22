@@ -30,7 +30,7 @@ It is not a medical device or a substitute for medical care. If you are worried 
    - **Alerts:** history of alerts sent, with a preview of each email.
    - **Settings:** dose times with an optional name each (for example "Morning pills" - please no medicine names), camera, window and timezone.
    - **Privacy:** what is and is not stored.
-   - A clearly labelled **Simulate motion (demo)** button adds a simulated motion event so the timeline can be shown filling in live, and "Remove simulated events" deletes only those.
+   - A clearly labelled **Simulate motion (demo)** button adds a simulated motion event so the timeline can be shown filling in live, and "Remove simulated events" deletes only those. If no Ring camera is available, Settings always offers "Demo camera (simulation)" so the demo still works; it is labelled as a simulation wherever it appears, and no alert emails are sent while it is selected.
 3. **Gentle "possibly missed" alerts** by email through AWS SES, written by Claude on Amazon Bedrock under strict instructions (calm, never certain, no medical advice, never suggests taking a dose late or changing any medicine, never names a medicine). If the AI call fails, a fixed text with the same meaning is sent instead. One alert per dose window.
 4. **Original no-motion alert.** If the front door camera sees no motion for a long time (default 12 hours), a check-in email is sent. See [Known limits](#known-limits).
 

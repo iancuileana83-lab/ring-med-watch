@@ -6,7 +6,7 @@ const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 const { listDevices, verifySignature, parseWebhook } = require('./ring');
 const { createMemoryStore } = require('./store');
 const { createDynamoStore } = require('./store-dynamodb');
-const { validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses, dayBounds } = require('./doses');
+const { DEMO_CAMERA_ID, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses, dayBounds } = require('./doses');
 const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback,
   NAV, PRIVACY_LINES, UI, dosesSummary, alertsSummary, lastActivitySummary, houseStatus } = require('./wording');
 
@@ -171,6 +171,9 @@ function requireCronOrPassword(req, res, next) {
 
 app.post('/internal/check-doses', requireCronOrPassword, async (req, res) => {
   try {
+    // The demo camera is a simulation: never email the caregiver about a "missed" dose from it.
+    const settings = await store.getSettings();
+    if (settings.cameraId === DEMO_CAMERA_ID) return res.json({ doses: [], alerted: [], skipped: 'demo camera' });
     res.json(await checkDoses({ store, notify: notifyPossiblyMissed }));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -201,13 +204,14 @@ app.get('/api/today', requirePassword, async (req, res) => {
     date,
     timezone: settings.timezone,
     cameraId: settings.cameraId,
+    demoCamera: settings.cameraId === DEMO_CAMERA_ID,
     doses,
     events,
     alerts,
     summary: {
       doses: dosesSummary(doses.length, doses.filter((d) => d.status === 'likely_taken').length, doses.filter((d) => d.status === 'not_confirmed').length),
       alerts: alertsSummary(alerts.length),
-      last: lastActivitySummary(lastNear ? clock(lastNear.time, settings.timezone) : null, true),
+      last: lastActivitySummary(lastNear ? clock(lastNear.time, settings.timezone) : null, true, settings.cameraId === DEMO_CAMERA_ID),
       house: houseStatus(await hoursSinceLastMotion(now), NO_MOTION_ALERT_HOURS)
     },
     statusLabels: STATUS_LABELS,
@@ -220,7 +224,7 @@ app.get('/api/week', requirePassword, async (req, res) => {
   const settings = await store.getSettings();
   const now = Date.now();
   const events = await store.listEvents(weekStartIso(now, settings.timezone), new Date(now + 1000).toISOString());
-  res.json({ timezone: settings.timezone, days: evaluateWeek(settings, events, now), footer: FOOTER_LINES });
+  res.json({ timezone: settings.timezone, demoCamera: settings.cameraId === DEMO_CAMERA_ID, days: evaluateWeek(settings, events, now), footer: FOOTER_LINES });
 });
 
 // Alerts sent in the last 30 days (the retention period), newest first, with the email text.
@@ -233,7 +237,7 @@ app.get('/api/alerts', requirePassword, async (req, res) => {
 
 // Approved wording used by every dashboard page.
 app.get('/api/wording', requirePassword, (req, res) => {
-  res.json({ nav: NAV, privacy: PRIVACY_LINES, ui: UI, footer: FOOTER_LINES, statusLabels: STATUS_LABELS });
+  res.json({ nav: NAV, privacy: PRIVACY_LINES, ui: UI, demoCameraId: DEMO_CAMERA_ID, footer: FOOTER_LINES, statusLabels: STATUS_LABELS });
 });
 
 // Demo only: adds a motion event marked as a simulation at the chosen camera.

@@ -270,7 +270,7 @@ function setFooter(lines) {
 
 /* ---------- Today ---------- */
 function renderToday(d) {
-  $('todaySub').textContent = `${d.date} (${d.timezone})`;
+  $('todaySub').textContent = `${d.date} (${d.timezone})` + (d.demoCamera ? ` · ${wording.ui.demoCamera}` : '');
 
   const defs = [
     ['doses', wording.ui.cards.doses, d.summary.doses, ''],
@@ -300,7 +300,7 @@ function renderToday(d) {
   for (const e of d.events) {
     const near = e.deviceId === d.cameraId;
     const kind = e.type === 'motion_detected' ? 'Motion' : e.type;
-    const li = row(timeOf(e.time, d.timezone), `${kind} - ${near ? 'camera near the pills' : 'other camera'}`, e.simulated ? 'dot sim' : 'dot motion');
+    const li = row(timeOf(e.time, d.timezone), `${kind} - ${d.demoCamera && near ? 'demo camera (simulation)' : near ? 'camera near the pills' : 'other camera'}`, e.simulated ? 'dot sim' : 'dot motion');
     if (e.simulated) li.append(el('span', 'pill sim', wording.ui.simulate.badge));
     rows.push({ at: e.time, li });
   }
@@ -334,7 +334,7 @@ function cellStatus(s) { return s === 'in_window' ? 'upcoming' : s === 'no_camer
 
 async function loadWeek() {
   const w = await api('/api/week');
-  $('weekSub').textContent = `Last 7 days (${w.timezone})`;
+  $('weekSub').textContent = `Last 7 days (${w.timezone})` + (w.demoCamera ? ` · ${wording.ui.demoCamera}` : '');
   const days = w.days;
   const names = days[days.length - 1].doses.length ? days[days.length - 1].doses : [];
   const table = el('table', 'weekgrid');
@@ -428,6 +428,8 @@ async function loadSettings() {
   } catch (err) {
     $('msg').textContent = `Could not list Ring cameras: ${err.message}`;
   }
+  sel.append(new Option(wording.ui.demoCamera, wording.demoCameraId)); // always offered so the demo works without Ring
+  ids.add(wording.demoCameraId);
   if (s.cameraId && !ids.has(s.cameraId)) sel.append(new Option(s.cameraId, s.cameraId));
   sel.value = s.cameraId || '';
   setFooter(wording.footer);
