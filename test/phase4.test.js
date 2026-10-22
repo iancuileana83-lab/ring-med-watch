@@ -160,7 +160,7 @@ test('summary prompt is exactly the approved text', () => {
 test('both AI prompts carry the approved plain-text rule', () => {
   const { missedPrompt } = require('../wording');
   const rule = "Write plain text only, with no markdown, asterisks or bold. Always say 'possibly missed', never 'skipped', 'forgot' or any word that sounds certain.";
-  assert.ok(missedPrompt('08:00', '07:45', '08:45').includes(rule + ' Sign it'));
+  assert.ok(missedPrompt('08:00', '07:45', '08:45').includes(rule + " Use the phrase 'possibly missed' once, never combine it with 'may have been'. Sign it"));
   assert.ok(summaryPrompt({ doses: [{ time: '08:00', status: 'likely_taken' }], alertsSent: 0, checkedIn: 0 }).includes(rule + ' Sign it'));
 });
 

@@ -21,13 +21,13 @@ const MISSED_SUBJECT = 'Ring Med Watch: dose possibly missed';
 const PLAIN_TEXT_RULE = "Write plain text only, with no markdown, asterisks or bold. Always say 'possibly missed', never 'skipped', 'forgot' or any word that sounds certain.";
 
 function missedPrompt(doseTime, windowStart, windowEnd) {
-  return `Write a short, calm message (max 300 characters) to a family caregiver. No motion was seen near the pill area between ${windowStart} and ${windowEnd}, so the ${doseTime} dose was possibly missed. Motion does not prove a pill was taken, and no motion does not prove it was missed. Gently ask them to check in. Never say the dose was definitely missed. Do not give medical advice. Never suggest taking the dose late, taking a double dose or changing any medicine, and never name a medicine; only suggest checking in with the person. ${PLAIN_TEXT_RULE} Sign it "- Ring Med Watch".`;
+  return `Write a short, calm message (max 300 characters) to a family caregiver. No motion was seen near the pill area between ${windowStart} and ${windowEnd}, so the ${doseTime} dose was possibly missed. Motion does not prove a pill was taken, and no motion does not prove it was missed. Gently ask them to check in. Never say the dose was definitely missed. Do not give medical advice. Never suggest taking the dose late, taking a double dose or changing any medicine, and never name a medicine; only suggest checking in with the person. ${PLAIN_TEXT_RULE} Use the phrase 'possibly missed' once, never combine it with 'may have been'. Sign it "- Ring Med Watch".`;
 }
 
 const NAV = ['Today', 'Week', 'Alerts', 'Settings', 'Privacy'];
 
 const PRIVACY_LINES = [
-  'No video and no images are stored. The app never requests or downloads any camera footage.',
+  'No video and no images are stored. The app never records or downloads camera footage. The optional "Look in now" button opens a live view that goes straight from Ring to your browser and is never recorded or stored.',
   'Only three facts about each Ring event are kept: the time, the event type and which camera it came from.',
   'Settings (dose times, labels, chosen camera, timezone) and a record of which alerts were sent are also kept, including the text of each alert email so you can preview it.',
   'Events and alert records are deleted automatically after 30 days.',
@@ -44,7 +44,7 @@ const UI = {
   alertsEmpty: 'No alerts sent yet.',
   emailPreview: 'Email preview',
   weekNotes: ['This shows motion near the pills, not whether medicine was taken.', 'Past days use your current dose settings.'],
-  weekLegend: { likely_taken: 'Activity seen', not_confirmed: 'Not confirmed', upcoming: 'Upcoming', not_set: 'Not set' },
+  weekLegend: { likely_taken: 'Activity seen', not_confirmed: 'Not confirmed', no_data: 'No data', upcoming: 'Upcoming', not_set: 'Not set' },
   simulate: {
     button: 'Simulate motion (demo)',
     banner: 'Demo: this adds a simulated motion event, not a real Ring event.',
@@ -53,6 +53,19 @@ const UI = {
   },
   // PROPOSED wording for real Ring (Playground) events and camera list, pending approval.
   ringEventBadge: 'Ring Playground event',
+  // PROPOSED wording for the "Look in now" live view, pending approval.
+  live: {
+    button: 'Look in now',
+    title: 'Live view',
+    note: 'Live view goes straight from Ring to your browser. Nothing is recorded or stored.',
+    connecting: 'Connecting...',
+    playing: 'Live view ends automatically after a short time (30 to 60 seconds).',
+    ended: 'Live view ended.',
+    close: 'Close',
+    offline: 'The camera is offline.',
+    notFound: 'The camera was not found.',
+    failed: 'Live view could not start.'
+  },
   // PROPOSED wording for the Ring Playground token and Fetch Ring events, pending approval.
   token: {
     heading: 'Ring Playground token',

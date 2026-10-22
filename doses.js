@@ -141,14 +141,20 @@ function prevDate(dateStr) {
 
 // The last `days` local days (today included) with each dose's status, oldest first.
 // Past days are judged at the end of that day with the current settings.
-function evaluateWeek(settings, events, nowMs, days = 7) {
+// Days before a dose existed (its `since` date) or before the app had any data (`dataStartDate`) are 'no_data',
+// not 'not_confirmed': nothing could have been confirmed or missed then.
+function evaluateWeek(settings, events, nowMs, days = 7, { dataStartDate = null } = {}) {
   const tz = settings.timezone;
   const dates = [];
   for (let date = localDate(nowMs, tz); dates.length < days; date = prevDate(date)) dates.unshift(date);
   const today = dates[dates.length - 1];
   return dates.map((date) => {
     const at = date === today ? nowMs : zonedToUtcMs(nextDate(date), '00:00', tz) - 1;
-    return { date, doses: evaluateDoses(settings, events, at) };
+    const doses = evaluateDoses(settings, events, at).map((d, i) => {
+      const first = [settings.doses[i].since, dataStartDate].filter(Boolean).sort().pop(); // the later of the two
+      return date < today && first && date < first ? { ...d, status: 'no_data' } : d;
+    });
+    return { date, doses };
   });
 }
 
@@ -163,4 +169,4 @@ function weekStartIso(nowMs, tz, days = 7) {
 // not the dose's real alert, so they never count towards "alerts sent" or the daily summary.
 const isTestAlert = (alert) => String(alert.key).includes('#test-');
 
-module.exports = { isTestAlert, DEMO_CAMERA_ID, zonedToUtcMs, dayBounds, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses };
+module.exports = { localDate, isTestAlert, DEMO_CAMERA_ID, zonedToUtcMs, dayBounds, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses };

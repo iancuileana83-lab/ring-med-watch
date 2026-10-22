@@ -95,6 +95,43 @@ async function ringGet(path) {
   return res.json();
 }
 
+// Live view (WHEP): POST the browser's SDP offer, get the SDP answer and the session URL back.
+// Only the signaling goes through here; the video travels directly between Ring and the browser.
+async function startWhepSession(deviceId, sdpOffer) {
+  const res = await fetch(`${API_BASE}/v1/devices/${encodeURIComponent(deviceId)}/media/streaming/whep/sessions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${await getAccessToken()}`,
+      'Content-Type': 'application/sdp',
+      'User-Agent': USER_AGENT,
+      Hardware_Id: HARDWARE_ID
+    },
+    body: sdpOffer
+  });
+  if (res.status === 401 || res.status === 403) throw new RingError('Ring rejected the token', res.status);
+  if (res.status === 404) throw new RingError('The camera was not found', 404);
+  if (res.status === 503) throw new RingError('The camera is offline', 503);
+  if (res.status === 406) throw new RingError('Ring blocked this request (HTTP 406). Ring may block requests from cloud servers', 406);
+  if (res.status !== 201) throw new RingError(`Live view could not start: HTTP ${res.status}`, res.status);
+  const answer = await res.text();
+  const location = res.headers.get('location');
+  if (!answer || !location) throw new RingError('Ring did not return a live view session', 502);
+  // The session URL must stay on Ring's API host: it is later used for a DELETE with the token.
+  const url = new URL(location, API_BASE);
+  if (url.origin !== API_BASE) throw new RingError('Ring returned an unexpected session address', 502);
+  return { answer, location: url.toString() };
+}
+
+// Ends a live view session early (Ring also ends it by itself after 30 to 60 seconds). Best effort.
+async function stopWhepSession(location) {
+  const url = new URL(location);
+  if (url.origin !== API_BASE) return;
+  await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${await getAccessToken()}`, 'User-Agent': USER_AGENT, Hardware_Id: HARDWARE_ID }
+  });
+}
+
 // Lists the Ring cameras visible to the token as { id, name } (GET /v1/devices).
 async function listDevices() {
   const body = await ringGet('/v1/devices');
@@ -180,6 +217,6 @@ function deviceIdOf(payload) {
 }
 
 module.exports = {
-  RingError, listDevices, fetchHistoryEvents, verifySignature, parseWebhook,
+  RingError, listDevices, fetchHistoryEvents, startWhepSession, stopWhepSession, verifySignature, parseWebhook,
   ringApiConfigured, ringApiState, setPlaygroundToken, playgroundStatus
 };

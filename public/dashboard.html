@@ -99,11 +99,13 @@
   @media (min-width:760px) { .cell .txt { display:inline; } .cell svg { width:16px; height:16px; } }
   .cell.likely_taken { background:var(--ok-bg); color:var(--ok); }
   .cell.not_confirmed { background:var(--warn-bg); color:var(--warn); }
+  .cell.no_data { background:var(--neutral-bg); color:var(--muted); opacity:.7; }
   .legend { display:flex; flex-wrap:wrap; gap:8px 14px; margin:14px 0 6px; }
   .legend span { display:inline-flex; align-items:center; gap:6px; font-size:.88rem; }
   .legend i { width:14px; height:14px; border-radius:4px; background:var(--neutral-bg); border:1px solid var(--line); display:inline-block; }
   .legend i.likely_taken { background:var(--ok-bg); border-color:var(--ok); }
   .legend i.not_confirmed { background:var(--warn-bg); border-color:var(--warn); }
+  .legend i.no_data { opacity:.7; }
   .notes p { margin:4px 0; color:var(--muted); font-size:.9rem; }
 
   details { border-top:1px solid var(--line); margin-top:8px; padding-top:8px; }
@@ -111,7 +113,8 @@
   .email { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px; margin-top:8px; white-space:pre-wrap; font-size:.95rem; }
   .email .subj { font-weight:700; margin-bottom:6px; }
   .email .foot { color:var(--muted); font-size:.85rem; margin-top:10px; border-top:1px solid var(--line); padding-top:8px; }
-  .privacy-list li { display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--line); }
+  ul.list.privacy-list > li { display:flex; flex-wrap:nowrap; gap:12px; align-items:flex-start; padding:10px 0; border-top:1px solid var(--line); }
+  .privacy-list li span { flex:1 1 auto; min-width:0; }
   .privacy-list li:first-child { border-top:0; }
   .privacy-list svg { width:22px; height:22px; color:var(--accent); flex:none; margin-top:2px; }
 
@@ -126,6 +129,10 @@
     nav a svg { width:24px; height:24px; }
     main { padding-bottom:92px; }
   }
+  dialog { border:1px solid var(--line); border-radius:16px; background:var(--card); color:var(--text); padding:16px; width:min(92vw, 720px); box-shadow:0 10px 40px rgba(0,0,0,.3); }
+  dialog::backdrop { background:rgba(20,14,8,.55); }
+  dialog video { width:100%; aspect-ratio:16/9; background:#000; border-radius:10px; display:block; }
+  .btns { display:flex; gap:8px; flex-wrap:wrap; }
 </style>
 </head>
 <body>
@@ -157,7 +164,7 @@
     <section class="panel" id="ringPanel">
       <h2 id="ringPanelTitle"></h2>
       <p class="hint" id="ringStatusToday"></p>
-      <div class="btns"><button type="button" id="fetchBtn"></button></div>
+      <div class="btns"><button type="button" id="fetchBtn"></button><button type="button" class="plain" id="liveBtn"></button></div>
       <div class="msg" id="fetchMsg" role="status"></div>
     </section>
 
@@ -225,6 +232,14 @@
 
   <footer id="footer"></footer>
 </main>
+
+<dialog id="liveDialog" aria-labelledby="liveTitle">
+  <h2 id="liveTitle"></h2>
+  <video id="liveVideo" autoplay playsinline muted></video>
+  <p class="msg" id="liveMsg" role="status"></p>
+  <p class="hint" id="liveNote"></p>
+  <p><button type="button" id="liveClose"></button></p>
+</dialog>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -312,6 +327,7 @@ function renderToday(d) {
     li.append(el('span', 't', x.time));
     const g = el('span', 'grow'); g.append(el('div', 'name', doseName(x)));
     li.append(g, statusPill(x.status));
+    if (x.status === 'not_confirmed') { const b = el('button', 'plain', wording.ui.live.button); b.type = 'button'; b.onclick = startLive; li.append(b); }
     if (x.checkedIn) { const c = el('span', 'pill likely_taken'); c.append(icon('check'), document.createTextNode(wording.ui.checkedIn)); li.append(c); }
     return li;
   }));
@@ -360,6 +376,58 @@ async function simulate(path, method, msgText) {
     $('simMsg').textContent = msgText(r);
     await loadToday();
   } catch (err) { $('simMsg').textContent = err.message; }
+}
+
+/* ---------- Look in now: live view (Ring WHEP). Nothing is recorded or stored. ---------- */
+let live = null; // { pc, session }
+
+function liveMsg(text) { $('liveMsg').textContent = text; }
+
+function endLive(message) {
+  const current = live;
+  live = null;
+  if (!current) return;
+  try { current.pc.close(); } catch (e) { /* already closed */ }
+  $('liveVideo').srcObject = null;
+  if (current.session) {
+    // tell the server to end the Ring session early; Ring also ends it by itself after 30 to 60 seconds
+    fetch('/api/ring/live/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: current.session }), keepalive: true }).catch(() => {});
+  }
+  if (message) liveMsg(message);
+}
+
+async function startLive() {
+  const t = wording.ui.live;
+  endLive();
+  $('liveTitle').textContent = t.title;
+  $('liveNote').textContent = t.note;
+  $('liveClose').textContent = t.close;
+  liveMsg(t.connecting);
+  if (!$('liveDialog').open) $('liveDialog').showModal();
+
+  const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  const mine = { pc, session: null };
+  live = mine;
+  pc.addTransceiver('video', { direction: 'recvonly' }); // Ring requires receive-only transceivers
+  pc.ontrack = (ev) => { if (live === mine && ev.streams[0]) { $('liveVideo').srcObject = ev.streams[0]; liveMsg(t.playing); } };
+  pc.onconnectionstatechange = () => { if (live === mine && ['failed', 'closed', 'disconnected'].includes(pc.connectionState)) endLive(t.ended); };
+  try {
+    await pc.setLocalDescription(await pc.createOffer());
+    // Ring does not support trickle ICE: wait until gathering is complete before sending the offer.
+    await new Promise((resolve) => {
+      if (pc.iceGatheringState === 'complete') return resolve();
+      const done = () => { if (pc.iceGatheringState === 'complete') { pc.removeEventListener('icegatheringstatechange', done); resolve(); } };
+      pc.addEventListener('icegatheringstatechange', done);
+      setTimeout(resolve, 5000);
+    });
+    const r = await api('/api/ring/live/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sdp: pc.localDescription.sdp }) });
+    if (live !== mine) { fetch('/api/ring/live/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session: r.session }) }).catch(() => {}); return; }
+    mine.session = r.session;
+    await pc.setRemoteDescription({ type: 'answer', sdp: r.sdp });
+  } catch (err) {
+    const known = { 'The camera is offline': t.offline, 'The camera was not found': t.notFound };
+    if (live === mine) endLive(known[err.message] || (/^(Connect a Ring|Choose a Ring|Ring rejected)/.test(err.message) ? err.message : t.failed));
+  }
 }
 
 /* ---------- Ring Playground token and event fetch ---------- */
@@ -427,7 +495,7 @@ async function loadWeek() {
     });
     $('weekTable').replaceChildren(table);
   }
-  $('legend').replaceChildren(...['likely_taken', 'not_confirmed', 'upcoming', 'not_set'].map((k) => {
+  $('legend').replaceChildren(...['likely_taken', 'not_confirmed', 'no_data', 'upcoming', 'not_set'].map((k) => {
     const s = el('span'); s.append(el('i', k), document.createTextNode(wording.ui.weekLegend[k])); return s;
   }));
   $('weekNotes').replaceChildren(...wording.ui.weekNotes.map((n) => el('p', '', n)));
@@ -575,6 +643,11 @@ function route() {
   $('ringPanelTitle').textContent = wording.ui.token.heading;
   $('fetchBtn').textContent = wording.ui.token.fetch;
   $('fetchBtn').onclick = fetchRingEvents;
+  $('liveBtn').textContent = wording.ui.live.button;
+  $('liveBtn').onclick = startLive;
+  $('liveClose').onclick = () => $('liveDialog').close();
+  $('liveDialog').addEventListener('close', () => endLive());
+  window.addEventListener('pagehide', () => endLive());
   $('tokenForm').onsubmit = async (ev) => {
     ev.preventDefault();
     const field = $('ringToken');

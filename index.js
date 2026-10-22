@@ -3,12 +3,12 @@ const express = require('express');
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 
-const { listDevices, fetchHistoryEvents, verifySignature, parseWebhook, ringApiState, setPlaygroundToken, playgroundStatus, RingError } = require('./ring');
+const { startWhepSession, stopWhepSession, listDevices, fetchHistoryEvents, verifySignature, parseWebhook, ringApiState, setPlaygroundToken, playgroundStatus, RingError } = require('./ring');
 const { createMemoryStore } = require('./store');
 const { createDynamoStore } = require('./store-dynamodb');
 const { newToken, hashToken, TOKEN_RE } = require('./checkin');
 const { runDailySummary } = require('./summary');
-const { isTestAlert, DEMO_CAMERA_ID, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses, dayBounds } = require('./doses');
+const { localDate, isTestAlert, DEMO_CAMERA_ID, validateSettings, evaluateDoses, evaluateWeek, weekStartIso, checkDoses, dayBounds } = require('./doses');
 const { STATUS_LABELS, FOOTER_LINES, MISSED_SUBJECT, missedPrompt, missedFallback,
   CHECKIN, SUMMARY_SUBJECT, DEMO_ALERT_SUFFIX, DEMO_ALERT_NOTE,
   NAV, PRIVACY_LINES, UI, EVENT_LABELS, OTHER_EVENT_PREFIX, fetchResultText, seenDeviceName, dosesSummary, alertsSummary, lastActivitySummary, houseStatus } = require('./wording');
@@ -185,13 +185,56 @@ app.post('/api/ring/fetch-events', requirePassword, async (req, res) => {
   }
 });
 
+// ---- "Look in now": live view through Ring's WHEP API. Only the SDP is relayed; nothing is recorded or stored. ----
+const liveSessions = new Map(); // opaque id -> { location, expiresAt }; in memory only, never persisted
+
+function purgeLiveSessions() {
+  const now = Date.now();
+  for (const [id, s] of liveSessions) if (s.expiresAt <= now) liveSessions.delete(id); // Ring ends sessions itself
+}
+
+app.post('/api/ring/live/start', requirePassword, async (req, res) => {
+  const sdp = req.body && req.body.sdp;
+  if (playgroundStatus().state !== 'connected') return res.status(400).json({ error: 'Connect a Ring Playground token first' });
+  const { cameraId } = await store.getSettings();
+  if (!cameraId || cameraId === DEMO_CAMERA_ID) return res.status(400).json({ error: 'Choose a Ring camera in Settings first' });
+  if (typeof sdp !== 'string' || !sdp.startsWith('v=0') || sdp.length > 60000) return res.status(400).json({ error: 'Invalid live view request' });
+  try {
+    const { answer, location } = await startWhepSession(cameraId, sdp);
+    purgeLiveSessions();
+    const id = require('crypto').randomBytes(16).toString('hex');
+    liveSessions.set(id, { location, expiresAt: Date.now() + 120000 });
+    res.json({ sdp: answer, session: id }); // the SDP itself is never logged
+  } catch (err) {
+    console.warn('Live view failed:', err.message); // no token, no SDP
+    const status = err instanceof RingError ? err.status : null;
+    res.status(status === 503 ? 503 : status === 404 ? 404 : status === 401 ? 401 : 502).json({ error: err instanceof RingError ? err.message : 'Live view could not start' });
+  }
+});
+
+app.post('/api/ring/live/stop', requirePassword, async (req, res) => {
+  const s = liveSessions.get(req.body && req.body.session);
+  if (!s) return res.json({ stopped: false });
+  liveSessions.delete(req.body.session);
+  try { await stopWhepSession(s.location); } catch (err) { console.warn('Live view stop failed:', err.message); }
+  res.json({ stopped: true });
+});
+
 app.get('/api/settings', requirePassword, async (req, res) => {
   res.json(await store.getSettings());
 });
 
 app.put('/api/settings', requirePassword, async (req, res) => {
   try {
-    res.json(await store.saveSettings(validateSettings(req.body || {})));
+    const patch = validateSettings(req.body || {});
+    if (patch.doses) {
+      // Remember the date each dose time first appeared, so the Week grid can say "No data" for earlier days.
+      const current = await store.getSettings();
+      const today = dayBounds(Date.now(), patch.timezone || current.timezone).date;
+      const earlier = new Map(current.doses.map((d) => [d.time, d.since]));
+      patch.doses = patch.doses.map((d) => ({ ...d, since: earlier.get(d.time) || today }));
+    }
+    res.json(await store.saveSettings(patch));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -367,8 +410,14 @@ app.get('/api/today', requirePassword, async (req, res) => {
 app.get('/api/week', requirePassword, async (req, res) => {
   const settings = await store.getSettings();
   const now = Date.now();
-  const events = await store.listEvents(weekStartIso(now, settings.timezone), new Date(now + 1000).toISOString());
-  res.json({ timezone: settings.timezone, demoCamera: settings.cameraId === DEMO_CAMERA_ID, days: evaluateWeek(settings, events, now), footer: FOOTER_LINES });
+  const startIso = weekStartIso(now, settings.timezone);
+  const endIso = new Date(now + 1000).toISOString();
+  const events = await store.listEvents(startIso, endIso);
+  const alerts = await store.listAlerts(startIso, endIso);
+  // The app "had data" from the first recorded event or alert; with none at all, only today counts.
+  const stamps = [...events.map((e) => Date.parse(e.time)), ...alerts.map((a) => Date.parse(a.sentAt))];
+  const dataStartDate = stamps.length ? localDate(Math.min(...stamps), settings.timezone) : dayBounds(now, settings.timezone).date;
+  res.json({ timezone: settings.timezone, demoCamera: settings.cameraId === DEMO_CAMERA_ID, days: evaluateWeek(settings, events, now, 7, { dataStartDate }), footer: FOOTER_LINES });
 });
 
 // Alerts sent in the last 30 days (the retention period), newest first, with the email text.

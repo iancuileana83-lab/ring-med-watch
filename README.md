@@ -22,7 +22,7 @@ It is not a medical device or a substitute for medical care. If you are worried 
 
 ## Privacy
 
-- **No video and no images are stored.** The app never requests or downloads any camera footage.
+- **No video and no images are stored.** The app never records or downloads camera footage. The optional "Look in now" button opens a live view that goes straight from Ring to your browser and is never recorded or stored.
 - Only three facts about each Ring event are kept: **the time, the event type and which camera it came from**.
 - Settings (dose times, labels, chosen camera, timezone) and a record of which alerts were sent are also kept, including the text of each alert email so the caregiver can preview it.
 - Events and alert records are deleted automatically after **30 days** (DynamoDB TTL).
@@ -37,10 +37,11 @@ It is not a medical device or a substitute for medical care. If you are worried 
 1. **Dose time windows.** Up to six dose times a day, a configurable window around each one (default 15 minutes before and 45 minutes after), and a choice of camera. Statuses: upcoming, dose window open, activity seen (not a confirmation), no activity seen (not confirmed).
 2. **Caregiver dashboard** (`/`), a mobile-friendly app with five pages:
    - **Today:** summary cards (doses today, alerts sent, last activity, house status), each dose with its status, and a timeline of dose windows, motion events and alerts.
-   - **Week:** a 7-day colour grid with "Activity seen" or "Not confirmed" for every dose window (past days use the current dose settings).
+   - **Week:** a 7-day colour grid with "Activity seen" or "Not confirmed" for every dose window. Days before a dose time existed, or before the app had any data, show "No data" in grey (past days use the current dose settings).
    - **Alerts:** history of alerts sent, with a preview of each email.
    - **Settings:** dose times with an optional name each (for example "Morning pills" - please no medicine names), camera, window and timezone.
    - **Privacy:** what is and is not stored.
+   - **Look in now:** on a "not confirmed" dose and on Today, a button opens a live view of the chosen Ring camera in the dashboard through Ring's WHEP live view API, using the Playground token. Only the SDP signaling passes through the server; the video goes straight from Ring to the browser and is never recorded or stored. Ring ends a live session after 30 to 60 seconds. It has been tested in a real browser against a stand-in WebRTC answerer; it has not been verified against a real Ring camera stream.
    - A clearly labelled **Simulate motion (demo)** button adds a simulated motion event so the timeline can be shown filling in live, and "Remove simulated events" deletes only those. If no Ring camera is available, Settings always offers "Demo camera (simulation)" so the demo still works; it is labelled as a simulation wherever it appears, and no alert emails are sent while it is selected.
 3. **Gentle "possibly missed" alerts** by email through AWS SES, written by Claude on Amazon Bedrock under strict instructions (calm, never certain, no medical advice, never suggests taking a dose late or changing any medicine, never names a medicine). If the AI call fails, a fixed text with the same meaning is sent instead. At most one alert per dose window per day: the alert is reserved with a conditional write in DynamoDB *before* the email is sent, so overlapping checks, scheduler retries, restarts and redeploys can never send it twice (if sending fails, the reservation is released and the next check retries).
 4. **"I checked in" link.** Every missed-dose email ends with a one-time link. It opens a small page with a button (so mail scanners cannot resolve it by accident); pressing it marks the alert as checked in on the Alerts page and the Today cards. It needs no login, the token works once, and it never changes a dose status.
@@ -78,6 +79,7 @@ Caregiver browser -> / (dashboard) -> /api/today, /api/settings, /api/devices
 | `GET /api/devices` | password | Ring cameras: from the Ring API when a token is connected, plus devices seen in Ring events |
 | `PUT /api/ring/token`, `GET /api/ring/status` | password | Paste the Playground token (memory only) / connection status |
 | `POST /api/ring/fetch-events` | password | Pull motion events from Ring Event History for the chosen camera |
+| `POST /api/ring/live/start`, `POST /api/ring/live/stop` | password | "Look in now": relay the WebRTC offer to Ring's WHEP endpoint and end the session (SDP only, no video) |
 | `GET /api/events` | password | Recorded events (time, type, camera) |
 | `POST /internal/check-doses` | password or `X-Cron-Token` | Checks dose windows and sends alerts (called by Cloud Scheduler) |
 | `POST /internal/daily-summary` | password or `X-Cron-Token` | Sends the daily summary once a day (second Scheduler job) |
