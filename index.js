@@ -3,8 +3,27 @@ const express = require('express');
 const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
 const { SESv2Client, SendEmailCommand } = require('@aws-sdk/client-sesv2');
 
+const { listDevices, verifySignature, parseWebhook } = require('./ring');
+const { createMemoryStore } = require('./store');
+
 const app = express();
-app.use(express.json());
+// Keep the raw bytes: Ring's webhook signature is computed over them.
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
+
+const store = createMemoryStore();
+
+// Simple password gate for the caregiver-only API (HTTP Basic, any username).
+function requirePassword(req, res, next) {
+  const expected = process.env.DASHBOARD_PASSWORD;
+  if (!expected) return res.status(503).json({ error: 'DASHBOARD_PASSWORD is not set' });
+  const header = req.headers.authorization || '';
+  const given = Buffer.from(header.replace(/^Basic /, ''), 'base64').toString().split(':').slice(1).join(':');
+  if (given !== expected) {
+    res.set('WWW-Authenticate', 'Basic realm="Ring Med Watch"');
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  next();
+}
 
 const NO_MOTION_ALERT_HOURS = Number(process.env.NO_MOTION_ALERT_HOURS || 12);
 const ALERT_EMAIL = process.env.ALERT_EMAIL;
@@ -63,19 +82,45 @@ async function checkAndAlert() {
   }
 }
 
-app.post('/webhooks/ring', (req, res) => {
-  const event = req.body;
-  console.log('Received Ring event:', JSON.stringify(event));
+app.post('/webhooks/ring', async (req, res) => {
+  // Signature check is enforced only when RING_HMAC_KEY is configured.
+  if (process.env.RING_HMAC_KEY && !verifySignature(req.rawBody || '', req.headers['x-signature'], process.env.RING_HMAC_KEY)) {
+    return res.status(401).send('Invalid signature');
+  }
 
-  const eventType = event?.data?.type || event?.type;
+  const parsed = parseWebhook(req.body);
+  // Log only what is stored: time, type, device. Never the full payload.
+  console.log('Received Ring event:', parsed ? `${parsed.type} ${parsed.time}` : 'unrecognised');
 
-  if (eventType === 'motion_detected') {
-    lastMotionAt = new Date();
-    alreadyAlerted = false;
-    console.log('Motion detected at', lastMotionAt.toISOString());
+  if (parsed) {
+    try {
+      await store.addEvent(parsed);
+    } catch (err) {
+      console.error('Could not store event:', err.message);
+    }
+    if (parsed.type === 'motion_detected') {
+      lastMotionAt = new Date(parsed.time);
+      alreadyAlerted = false;
+    }
   }
 
   res.status(200).send('OK');
+});
+
+// Lists Ring cameras on the linked account (used to pick the camera near the pills).
+app.get('/api/devices', requirePassword, async (req, res) => {
+  try {
+    res.json({ devices: await listDevices() });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// Today's recorded events (time, type, device only).
+app.get('/api/events', requirePassword, async (req, res) => {
+  const from = req.query.from || new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const to = req.query.to || new Date(Date.now() + 1000).toISOString();
+  res.json({ events: await store.listEvents(from, to) });
 });
 
 app.get('/health', (req, res) => {
@@ -99,7 +144,10 @@ app.post('/test/trigger-alert', async (req, res) => {
   }
 });
 
-setInterval(checkAndAlert, 5 * 60 * 1000);
+if (require.main === module) {
+  setInterval(checkAndAlert, 5 * 60 * 1000);
+  const PORT = process.env.PORT || 8080;
+  app.listen(PORT, () => console.log(`Ring Med Watch listening on port ${PORT}`));
+}
 
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`Ring Med Watch listening on port ${PORT}`));
+module.exports = { app, store };
